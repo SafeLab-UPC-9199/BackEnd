@@ -17,6 +17,7 @@ import jakarta.annotation.PreDestroy;
 import org.eclipse.paho.client.mqttv3.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -44,6 +45,7 @@ import com.test.backend.iam.application.internal.outboundservices.email.EmailSer
 import com.test.backend.labs.domain.model.valueobjets.NotificationPreferences;
 
 @Service
+@ConditionalOnProperty(prefix = "mqtt", name = "enabled", havingValue = "true")
 public class MqttTelemetrySubscriber implements MqttCallbackExtended {
 
     private static final Logger logger = LoggerFactory.getLogger(MqttTelemetrySubscriber.class);

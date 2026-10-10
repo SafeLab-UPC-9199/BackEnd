@@ -4,6 +4,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,15 +17,22 @@ import java.util.Map;
 @RequestMapping("/api/v1/telemetry/simulate")
 public class TelemetrySimulationController {
 
-    private final MqttClient mqttClient;
+    private final ObjectProvider<MqttClient> mqttClientProvider;
 
-    public TelemetrySimulationController(MqttClient mqttClient) {
-        this.mqttClient = mqttClient;
+    public TelemetrySimulationController(ObjectProvider<MqttClient> mqttClientProvider) {
+        this.mqttClientProvider = mqttClientProvider;
     }
 
     @PostMapping
     @Operation(summary = "Publish a mock telemetry payload to the MQTT broker")
     public ResponseEntity<Map<String, String>> simulateTelemetry(@RequestBody Map<String, Object> request) {
+        MqttClient mqttClient = mqttClientProvider.getIfAvailable();
+        if (mqttClient == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(Map.of(
+                "status", "ERROR",
+                "message", "MQTT is disabled on this deployment (mqtt.enabled=false)."
+            ));
+        }
         try {
             String unit = request.getOrDefault("unit", "°C").toString();
             String metricName = request.getOrDefault("metric", "temperature").toString();

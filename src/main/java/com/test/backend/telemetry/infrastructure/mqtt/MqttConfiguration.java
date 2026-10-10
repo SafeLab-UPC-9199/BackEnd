@@ -4,6 +4,7 @@ import com.test.backend.shared.infrastructure.persistence.configuration.MqttProp
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -19,6 +20,7 @@ public class MqttConfiguration {
     }
 
     @Bean
+    @ConditionalOnProperty(prefix = "mqtt", name = "enabled", havingValue = "true")
     public MqttClient mqttClient() throws Exception {
         String protocol = mqttProperties.getProtocol();
         if (protocol == null) protocol = "tcp";
@@ -35,6 +37,7 @@ public class MqttConfiguration {
     }
     
     @Bean
+    @ConditionalOnProperty(prefix = "mqtt", name = "enabled", havingValue = "true")
     public MqttConnectOptions mqttConnectOptions() {
         String protocol = mqttProperties.getProtocol();
         MqttConnectOptions options = new MqttConnectOptions();
