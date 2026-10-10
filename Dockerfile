@@ -10,4 +10,7 @@ WORKDIR /app
 # Copiamos el JAR gordo generado omitiendo los .jar estandar si los hubiera
 COPY --from=build /app/target/*-SNAPSHOT.jar app.jar
 EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "app.jar"]
+
+# Optimización de memoria para Render Free Tier (512MB RAM)
+ENV JAVA_OPTS="-XX:+UseSerialGC -Xmx384m -Xss512k -Dfile.encoding=UTF-8"
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
