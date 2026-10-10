@@ -12,6 +12,7 @@ import com.test.backend.labs.interfaces.rest.transform.CreateLaboratoryCommandFr
 import com.test.backend.labs.interfaces.rest.transform.LaboratoryResourceFromEntityAssembler;
 import com.test.backend.labs.interfaces.rest.transform.UpdateLaboratoryCommandFromResourceAssembler;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
