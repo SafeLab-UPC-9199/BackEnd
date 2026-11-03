@@ -1,13 +1,24 @@
-# --- Etapa 1: Compilación ---
-FROM maven:3.9-eclipse-temurin-25 AS build
+# Stage 1: Build the JAR inside the container
+FROM eclipse-temurin:24-jdk AS builder
 WORKDIR /app
-COPY . .
-RUN mvn clean package -DskipTests
 
-# --- Etapa 2: Ejecución ---
-FROM eclipse-temurin:25-jre-jammy
+# Copy Maven wrapper and POM
+COPY .mvn/ .mvn/
+COPY mvnw pom.xml ./
+
+# Normalize line endings from Windows CRLF to Linux LF and set executable permissions
+RUN sed -i 's/\r$//' mvnw && chmod +x mvnw
+
+# Copy source code and build package
+COPY src/ ./src/
+RUN ./mvnw clean package -DskipTests
+
+# Stage 2: Minimal runtime image for Render
+FROM eclipse-temurin:24-jre
 WORKDIR /app
-# Copiamos el JAR gordo generado omitiendo los .jar estandar si los hubiera
-COPY --from=build /app/target/*-SNAPSHOT.jar app.jar
+
+COPY --from=builder /app/target/*-SNAPSHOT.jar app.jar
+
 EXPOSE 8080
-ENTRYPOINT ["java", "-jar", "app.jar"]
+
+ENTRYPOINT ["java", "-XX:+UseContainerSupport", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]

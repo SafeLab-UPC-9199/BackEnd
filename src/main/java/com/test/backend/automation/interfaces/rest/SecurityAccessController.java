@@ -4,6 +4,7 @@ import com.test.backend.automation.infrastructure.persistence.jpa.repositories.R
 import com.test.backend.automation.interfaces.rest.resources.SecurityAccessResource;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -23,6 +24,7 @@ public class SecurityAccessController {
     }
 
     @GetMapping
+    @Cacheable("permissions")
     @Operation(summary = "Get all security accesses (role permissions)")
     public ResponseEntity<List<SecurityAccessResource>> getAllAccesses() {
         var permissions = rolePermissionRepository.findAll();
