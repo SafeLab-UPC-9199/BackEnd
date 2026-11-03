@@ -78,12 +78,16 @@ public class IncidentCommandServiceImpl implements IncidentCommandService {
 
         var savedIncident = incidentRepository.save(incident);
 
+        // Correlation id ties every event/effect of this business transaction together.
+        var correlationId = UUID.randomUUID().toString();
         var outbox = new EventOutbox(
                 "INCIDENT_CREATED",
                 "Incident",
                 String.valueOf(savedIncident.getId()),
                 "{\"incidentId\":" + savedIncident.getId() + ",\"laboratoryId\":" + laboratory.getId() + ",\"severity\":\"" + savedIncident.getSeverity() + "\"}",
-                laboratory.getWorkspace() != null ? String.valueOf(laboratory.getWorkspace().getId()) : null
+                laboratory.getWorkspace() != null ? String.valueOf(laboratory.getWorkspace().getId()) : null,
+                correlationId,
+                EventOutbox.DEFAULT_SCHEMA_VERSION
         );
         eventOutboxRepository.save(outbox);
 
@@ -116,12 +120,15 @@ public class IncidentCommandServiceImpl implements IncidentCommandService {
 
         var savedIncident = incidentRepository.save(incident);
 
+        var correlationId = UUID.randomUUID().toString();
         var outbox = new EventOutbox(
                 "INCIDENT_ACKNOWLEDGED",
                 "Incident",
                 String.valueOf(savedIncident.getId()),
                 "{\"incidentId\":" + savedIncident.getId() + ",\"status\":\"ACKNOWLEDGED\"}",
-                savedIncident.getLaboratory().getWorkspace() != null ? String.valueOf(savedIncident.getLaboratory().getWorkspace().getId()) : null
+                savedIncident.getLaboratory().getWorkspace() != null ? String.valueOf(savedIncident.getLaboratory().getWorkspace().getId()) : null,
+                correlationId,
+                EventOutbox.DEFAULT_SCHEMA_VERSION
         );
         eventOutboxRepository.save(outbox);
 
@@ -155,12 +162,15 @@ public class IncidentCommandServiceImpl implements IncidentCommandService {
 
         var savedIncident = incidentRepository.save(incident);
 
+        var correlationId = UUID.randomUUID().toString();
         var outbox = new EventOutbox(
                 "INCIDENT_RESOLVED",
                 "Incident",
                 String.valueOf(savedIncident.getId()),
                 "{\"incidentId\":" + savedIncident.getId() + ",\"technicianId\":" + command.technicianId() + "}",
-                savedIncident.getLaboratory().getWorkspace() != null ? String.valueOf(savedIncident.getLaboratory().getWorkspace().getId()) : null
+                savedIncident.getLaboratory().getWorkspace() != null ? String.valueOf(savedIncident.getLaboratory().getWorkspace().getId()) : null,
+                correlationId,
+                EventOutbox.DEFAULT_SCHEMA_VERSION
         );
         eventOutboxRepository.save(outbox);
 
@@ -193,12 +203,15 @@ public class IncidentCommandServiceImpl implements IncidentCommandService {
 
         var savedIncident = incidentRepository.save(incident);
 
+        var correlationId = UUID.randomUUID().toString();
         var outbox = new EventOutbox(
                 "INCIDENT_ESCALATED",
                 "Incident",
                 String.valueOf(savedIncident.getId()),
                 "{\"incidentId\":" + savedIncident.getId() + ",\"escalatedTo\":\"" + savedIncident.getEscalationNextRole() + "\"}",
-                savedIncident.getLaboratory().getWorkspace() != null ? String.valueOf(savedIncident.getLaboratory().getWorkspace().getId()) : null
+                savedIncident.getLaboratory().getWorkspace() != null ? String.valueOf(savedIncident.getLaboratory().getWorkspace().getId()) : null,
+                correlationId,
+                EventOutbox.DEFAULT_SCHEMA_VERSION
         );
         eventOutboxRepository.save(outbox);
 
