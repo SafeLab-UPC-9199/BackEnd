@@ -36,8 +36,9 @@ services:
       AUTHORIZATION_JWT_SECRET: SafeLabSecretKeyForJwtTokenGeneration2026SecureKey32BytesLong!
       AUTHORIZATION_JWT_EXPIRATION_DAYS: 50
       MQTT_HOST: broker.hivemq.com
-      MQTT_PORT: 1883
-      MQTT_PROTOCOL: tcp
+      # MQTT v5 over TLS (Iteration 1). Fallback: MQTT_PROTOCOL=tcp + MQTT_PORT=1883
+      MQTT_PORT: 8883
+      MQTT_PROTOCOL: mqtts
       MQTT_TOPIC: safelab/#
       PORT: 8080
 

@@ -9,4 +9,6 @@ import java.util.List;
 @Repository
 public interface AuditTrailRepository extends JpaRepository<AuditTrail, Long> {
     List<AuditTrail> findByTargetId(String targetId);
+    List<AuditTrail> findByAction(String action);
+    List<AuditTrail> findByTargetIdAndAction(String targetId, String action);
 }

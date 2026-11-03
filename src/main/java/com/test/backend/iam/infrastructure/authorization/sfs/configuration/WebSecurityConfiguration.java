@@ -73,6 +73,7 @@ public class WebSecurityConfiguration {
                                 "/api/v1/authentication/clean-test-users",
                                 "/api/v1/system/status",
                                 "/api/v1/telemetry/simulate",
+                                "/api/v1/telemetry/ingestion",
                                 "/v3/api-docs/**",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",

@@ -3,7 +3,9 @@ package com.test.backend.alerts.application.internal.commandservices;
 import com.test.backend.alerts.domain.model.aggregates.Alert;
 import com.test.backend.alerts.domain.model.commands.CreateAlertCommand;
 import com.test.backend.alerts.domain.model.commands.DeleteAlertCommand;
+import com.test.backend.alerts.domain.model.commands.UpdateAlertCommand;
 import com.test.backend.alerts.infrastructure.persistence.jpa.repositories.AlertRepository;
+import com.test.backend.compliance.infrastructure.persistence.jpa.repositories.AuditTrailRepository;
 import com.test.backend.history.domain.model.aggregates.HistoryRecord;
 import com.test.backend.history.infrastructure.persistence.jpa.repositories.HistoryRecordRepository;
 import com.test.backend.labs.domain.model.aggregates.Laboratory;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
 
@@ -36,6 +39,9 @@ class AlertCommandServiceImplTest {
 
     @Mock
     private HistoryRecordRepository historyRecordRepository;
+
+    @Mock
+    private AuditTrailRepository auditTrailRepository;
 
     @InjectMocks
     private AlertCommandServiceImpl service;
@@ -84,5 +90,63 @@ class AlertCommandServiceImplTest {
         // Assert
         verify(alertRepository).findByIdAndLaboratoryWorkspaceId(5L, 1L);
         verify(alertRepository).delete(alert);
+    }
+
+    @Test
+    @DisplayName("handle(UpdateAlertCommand) should write signed audit trail when status changes (AAA)")
+    void handle_UpdateAlert_ShouldWriteAuditTrail_WhenStatusChanges() {
+        // Arrange
+        var alert = new Alert();
+        ReflectionTestUtils.setField(alert, "id", 7L);
+        alert.setTitle("Temperature Breach");
+        alert.setStatus("ACTIVE");
+        alert.setLabName("Bio-Safety Lab 04");
+
+        when(currentWorkspaceService.getCurrentWorkspaceId()).thenReturn(Optional.of(1L));
+        when(currentWorkspaceService.getCurrentUserEmail()).thenReturn(Optional.of("tech@safelab.com"));
+        when(alertRepository.findByIdAndLaboratoryWorkspaceId(7L, 1L)).thenReturn(Optional.of(alert));
+        when(alertRepository.save(any(Alert.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        var command = new UpdateAlertCommand(7L, "Temperature Breach", "desc", "CRITICAL", "RESOLVED",
+                "Bio-Safety Lab 04", "Just now", null);
+
+        // Act
+        var result = service.handle(command);
+
+        // Assert
+        assertTrue(result.isPresent());
+        assertEquals("RESOLVED", result.get().getStatus());
+        verify(auditTrailRepository).save(argThat(audit ->
+                "UPDATE_ALERT_STATUS".equals(audit.getAction())
+                        && "tech@safelab.com".equals(audit.getActor())
+                        && "ACTIVE".equals(audit.getPreviousState())
+                        && "RESOLVED".equals(audit.getNewState())
+                        && "7".equals(audit.getTargetId())
+                        && audit.getSignature() != null
+                        && audit.getSignature().length() == 64));
+    }
+
+    @Test
+    @DisplayName("handle(UpdateAlertCommand) should NOT write audit trail when status is unchanged (AAA)")
+    void handle_UpdateAlert_ShouldNotWriteAuditTrail_WhenStatusUnchanged() {
+        // Arrange
+        var alert = new Alert();
+        ReflectionTestUtils.setField(alert, "id", 8L);
+        alert.setTitle("Temperature Breach");
+        alert.setStatus("ACTIVE");
+
+        when(currentWorkspaceService.getCurrentWorkspaceId()).thenReturn(Optional.of(1L));
+        when(alertRepository.findByIdAndLaboratoryWorkspaceId(8L, 1L)).thenReturn(Optional.of(alert));
+        when(alertRepository.save(any(Alert.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        var command = new UpdateAlertCommand(8L, "Temperature Breach", "new description", "CRITICAL", "ACTIVE",
+                "Bio-Safety Lab 04", "Just now", null);
+
+        // Act
+        var result = service.handle(command);
+
+        // Assert
+        assertTrue(result.isPresent());
+        verify(auditTrailRepository, never()).save(any());
     }
 }

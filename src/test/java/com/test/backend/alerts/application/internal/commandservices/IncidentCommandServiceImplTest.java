@@ -92,7 +92,11 @@ class IncidentCommandServiceImplTest {
         assertEquals("OPEN", result.get().getStatus());
         assertEquals("CRITICAL", result.get().getSeverity());
         verify(incidentRepository).save(any(Incident.class));
-        verify(eventOutboxRepository).save(argThat(outbox -> "INCIDENT_CREATED".equals(outbox.getEventType())));
+        verify(eventOutboxRepository).save(argThat(outbox ->
+                "INCIDENT_CREATED".equals(outbox.getEventType())
+                        && outbox.getCorrelationId() != null
+                        && !outbox.getCorrelationId().isBlank()
+                        && EventOutbox.DEFAULT_SCHEMA_VERSION.equals(outbox.getSchemaVersion())));
         verify(auditTrailRepository).save(argThat(audit -> "CREATE_INCIDENT".equals(audit.getAction()) && audit.getSignature() != null));
     }
 
