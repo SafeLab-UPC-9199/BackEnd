@@ -4,6 +4,8 @@ import com.test.backend.automation.infrastructure.persistence.jpa.repositories.G
 import com.test.backend.automation.interfaces.rest.resources.GeneralSettingResource;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,6 +23,7 @@ public class GeneralSettingController {
     }
 
     @GetMapping
+    @Cacheable("generalSettings")
     @Operation(summary = "Get all general settings")
     public ResponseEntity<List<GeneralSettingResource>> getAllSettings() {
         var settings = generalSettingRepository.findAll();
@@ -37,6 +40,7 @@ public class GeneralSettingController {
     }
 
     @PutMapping("/{id}")
+    @CacheEvict(cacheNames = "generalSettings", allEntries = true)
     @Operation(summary = "Update general setting")
     public ResponseEntity<GeneralSettingResource> updateSetting(@PathVariable Long id, @RequestBody GeneralSettingResource resource) {
         var settingOpt = generalSettingRepository.findById(id);

@@ -13,6 +13,8 @@ import com.test.backend.telemetry.interfaces.rest.transform.MetricTypeResourceFr
 import com.test.backend.telemetry.interfaces.rest.transform.UpdateMetricTypeCommandFromResourceAssembler;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -34,6 +36,7 @@ public class MetricTypeController {
     }
 
     @GetMapping
+    @Cacheable("metricTypes")
     @Operation(summary = "Get all metric types")
     public ResponseEntity<List<MetricTypeResource>> getAllMetricTypes() {
         var metricTypes = metricTypeQueryService.handle(new GetAllMetricTypesQuery());
@@ -44,6 +47,7 @@ public class MetricTypeController {
     }
 
     @GetMapping("/active")
+    @Cacheable("activeMetricTypes")
     @Operation(summary = "Get active metric types only")
     public ResponseEntity<List<MetricTypeResource>> getActiveMetricTypes() {
         var metricTypes = metricTypeQueryService.handle(new GetActiveMetricTypesQuery());
@@ -54,6 +58,7 @@ public class MetricTypeController {
     }
 
     @PostMapping
+    @CacheEvict(cacheNames = {"metricTypes", "activeMetricTypes"}, allEntries = true)
     @Operation(summary = "Create a new metric type")
     public ResponseEntity<MetricTypeResource> createMetricType(@RequestBody CreateMetricTypeResource resource) {
         var command = CreateMetricTypeCommandFromResourceAssembler.toCommandFromResource(resource);
@@ -63,6 +68,7 @@ public class MetricTypeController {
     }
 
     @PutMapping("/{id}")
+    @CacheEvict(cacheNames = {"metricTypes", "activeMetricTypes"}, allEntries = true)
     @Operation(summary = "Update an existing metric type")
     public ResponseEntity<MetricTypeResource> updateMetricType(@PathVariable Long id, @RequestBody UpdateMetricTypeResource resource) {
         var command = UpdateMetricTypeCommandFromResourceAssembler.toCommandFromResource(id, resource);
@@ -72,6 +78,7 @@ public class MetricTypeController {
     }
 
     @DeleteMapping("/{id}")
+    @CacheEvict(cacheNames = {"metricTypes", "activeMetricTypes"}, allEntries = true)
     @Operation(summary = "Deactivate a metric type (soft delete)")
     public ResponseEntity<?> deleteMetricType(@PathVariable Long id) {
         try {
