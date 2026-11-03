@@ -6,6 +6,8 @@ import com.test.backend.alerts.domain.model.commands.UpdateAlertCommand;
 import com.test.backend.alerts.domain.model.commands.DeleteAlertCommand;
 import com.test.backend.alerts.domain.services.AlertCommandService;
 import com.test.backend.alerts.infrastructure.persistence.jpa.repositories.AlertRepository;
+import com.test.backend.compliance.domain.model.aggregates.AuditTrail;
+import com.test.backend.compliance.infrastructure.persistence.jpa.repositories.AuditTrailRepository;
 import com.test.backend.history.domain.model.aggregates.HistoryRecord;
 import com.test.backend.history.infrastructure.persistence.jpa.repositories.HistoryRecordRepository;
 import com.test.backend.labs.domain.model.aggregates.Laboratory;
@@ -13,8 +15,12 @@ import com.test.backend.labs.infrastructure.persistence.jpa.repositories.Laborat
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.util.HexFormat;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 public class AlertCommandServiceImpl implements AlertCommandService {
@@ -23,15 +29,18 @@ public class AlertCommandServiceImpl implements AlertCommandService {
     private final LaboratoryRepository laboratoryRepository;
     private final com.test.backend.shared.application.CurrentWorkspaceService currentWorkspaceService;
     private final HistoryRecordRepository historyRecordRepository;
+    private final AuditTrailRepository auditTrailRepository;
 
     public AlertCommandServiceImpl(AlertRepository alertRepository,
                                    LaboratoryRepository laboratoryRepository,
                                    com.test.backend.shared.application.CurrentWorkspaceService currentWorkspaceService,
-                                   HistoryRecordRepository historyRecordRepository) {
+                                   HistoryRecordRepository historyRecordRepository,
+                                   AuditTrailRepository auditTrailRepository) {
         this.alertRepository = alertRepository;
         this.laboratoryRepository = laboratoryRepository;
         this.currentWorkspaceService = currentWorkspaceService;
         this.historyRecordRepository = historyRecordRepository;
+        this.auditTrailRepository = auditTrailRepository;
     }
 
     @Override
@@ -72,7 +81,8 @@ public class AlertCommandServiceImpl implements AlertCommandService {
         if (alertOpt.isEmpty()) return Optional.empty();
 
         var alert = alertOpt.get();
-        boolean wasResolved = "RESOLVED".equalsIgnoreCase(alert.getStatus());
+        String previousStatus = alert.getStatus();
+        boolean wasResolved = "RESOLVED".equalsIgnoreCase(previousStatus);
 
         Laboratory laboratory = null;
         if (command.laboratoryId() != null) {
@@ -86,6 +96,23 @@ public class AlertCommandServiceImpl implements AlertCommandService {
         alertRepository.save(alert);
 
         boolean isResolvedNow = "RESOLVED".equalsIgnoreCase(alert.getStatus());
+
+        // Audit trail: record status transition with actor from JWT (only when status actually changed)
+        String newStatus = alert.getStatus();
+        if (previousStatus != null && !previousStatus.equalsIgnoreCase(newStatus)) {
+            var actor = currentWorkspaceService.getCurrentUserEmail().orElse("system-automation");
+            var audit = new AuditTrail(
+                    String.valueOf(alert.getId()),
+                    "UPDATE_ALERT_STATUS",
+                    actor,
+                    previousStatus,
+                    newStatus,
+                    "Alert '" + alert.getTitle() + "' status changed in laboratory " +
+                            (laboratory != null ? laboratory.getName() : alert.getLabName()),
+                    calculateHash(alert.getId(), "UPDATE_ALERT_STATUS", actor, previousStatus, newStatus)
+            );
+            auditTrailRepository.save(audit);
+        }
 
         if (laboratory != null && isResolvedNow) {
             boolean hasOtherActiveAlerts = alertRepository.findByLaboratoryId(laboratory.getId()).stream()
@@ -128,5 +155,20 @@ public class AlertCommandServiceImpl implements AlertCommandService {
                 .orElseThrow(() -> new IllegalArgumentException("Alert not found in this workspace"));
 
         alertRepository.delete(alert);
+    }
+
+    /**
+     * SHA-256 signature over the transition, mirroring the incident audit trail
+     * so both share the same tamper-evident format.
+     */
+    private String calculateHash(Long entityId, String action, String actor, String previousState, String newState) {
+        try {
+            var raw = entityId + "|" + action + "|" + actor + "|" + previousState + "|" + newState + "|" + System.currentTimeMillis();
+            var digest = MessageDigest.getInstance("SHA-256");
+            byte[] encoded = digest.digest(raw.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(encoded);
+        } catch (Exception e) {
+            return UUID.randomUUID().toString();
+        }
     }
 }
