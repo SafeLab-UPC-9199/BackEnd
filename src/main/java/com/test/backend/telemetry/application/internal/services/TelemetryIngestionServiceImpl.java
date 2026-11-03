@@ -19,11 +19,8 @@ import com.test.backend.labs.domain.model.entities.LabMetric;
 import com.test.backend.labs.domain.model.entities.LabMetricSubscription;
 import com.test.backend.labs.domain.model.valueobjets.NotificationPreferences;
 import com.test.backend.labs.infrastructure.persistence.jpa.repositories.LaboratoryRepository;
-import com.test.backend.telemetry.domain.model.aggregates.MetricType;
-import com.test.backend.telemetry.domain.model.aggregates.SensorReading;
-import com.test.backend.telemetry.domain.services.TelemetryIngestionService;
-import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.MetricTypeRepository;
-import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.SensorReadingRepository;
+import com.test.backend.telemetry.domain.model.events.TemperatureReadingRecorded;
+import org.springframework.context.ApplicationEventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -53,6 +50,7 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
     private final HistoryRecordRepository historyRecordRepository;
     private final UserWorkspaceAccessRepository userWorkspaceAccessRepository;
     private final EmailService emailService;
+    private final ApplicationEventPublisher applicationEventPublisher;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public TelemetryIngestionServiceImpl(SensorConfigurationRepository sensorConfigurationRepository,
@@ -63,7 +61,8 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
                                          AutomationRuleRepository automationRuleRepository,
                                          HistoryRecordRepository historyRecordRepository,
                                          UserWorkspaceAccessRepository userWorkspaceAccessRepository,
-                                         EmailService emailService) {
+                                         EmailService emailService,
+                                         ApplicationEventPublisher applicationEventPublisher) {
         this.sensorConfigurationRepository = sensorConfigurationRepository;
         this.laboratoryRepository = laboratoryRepository;
         this.sensorReadingRepository = sensorReadingRepository;
@@ -73,6 +72,7 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
         this.historyRecordRepository = historyRecordRepository;
         this.userWorkspaceAccessRepository = userWorkspaceAccessRepository;
         this.emailService = emailService;
+        this.applicationEventPublisher = applicationEventPublisher;
     }
 
     @Override
@@ -158,6 +158,19 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
             reading.setMetricValue(val);
             reading.setRecordedAt(recordedAt);
             sensorReadingRepository.save(reading);
+
+            // Publish domain event for decoupling (Iteration 1)
+            try {
+                applicationEventPublisher.publishEvent(new TemperatureReadingRecorded(
+                        reading.getId(),
+                        lab.getId(),
+                        metricType.getId(),
+                        val,
+                        recordedAt
+                ));
+            } catch (Exception ex) {
+                logger.debug("Failed to publish TemperatureReadingRecorded event: {}", ex.getMessage());
+            }
 
             // 2. Update real-time metrics for Dashboard display
             updateRealTimeLabMetric(lab, metricType, val, sensor);

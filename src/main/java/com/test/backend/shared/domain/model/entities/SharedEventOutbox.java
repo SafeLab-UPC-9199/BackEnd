@@ -1,4 +1,4 @@
-package com.test.backend.alerts.domain.model.entities;
+package com.test.backend.shared.domain.model.entities;
 
 import com.test.backend.shared.domain.model.entities.AuditableModel;
 import jakarta.persistence.*;
@@ -16,7 +16,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @Table(name = "event_outbox")
-public class EventOutbox extends AuditableModel {
+public class SharedEventOutbox extends AuditableModel {
 
     /**
      * Current version of the event payload contract. Bump when the payload
@@ -69,11 +69,11 @@ public class EventOutbox extends AuditableModel {
     @Column(name = "last_error", length = 1000)
     private String lastError;
 
-    public EventOutbox(String eventType, String aggregateType, String aggregateId, String payload, String organizationId) {
+    public SharedEventOutbox(String eventType, String aggregateType, String aggregateId, String payload, String organizationId) {
         this(eventType, aggregateType, aggregateId, payload, organizationId, null, null);
     }
 
-    public EventOutbox(String eventType, String aggregateType, String aggregateId, String payload, String organizationId,
+    public SharedEventOutbox(String eventType, String aggregateType, String aggregateId, String payload, String organizationId,
                        String correlationId, String schemaVersion) {
         this.eventId = UUID.randomUUID().toString();
         this.eventType = eventType;

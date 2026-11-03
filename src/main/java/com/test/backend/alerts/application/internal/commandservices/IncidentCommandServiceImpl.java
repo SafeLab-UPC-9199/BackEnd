@@ -6,15 +6,8 @@ import com.test.backend.alerts.domain.model.commands.ApplyEscalationCommand;
 import com.test.backend.alerts.domain.model.commands.CreateIncidentCommand;
 import com.test.backend.alerts.domain.model.commands.ResolveIncidentCommand;
 import com.test.backend.alerts.domain.model.entities.CorrectiveAction;
-import com.test.backend.alerts.domain.model.entities.EventOutbox;
-import com.test.backend.alerts.domain.services.DuplicateIncidentPolicy;
-import com.test.backend.alerts.domain.services.IncidentCommandService;
-import com.test.backend.alerts.infrastructure.persistence.jpa.repositories.EventOutboxRepository;
-import com.test.backend.alerts.infrastructure.persistence.jpa.repositories.IncidentRepository;
-import com.test.backend.alerts.infrastructure.security.JWTSecurityContextAdapter;
-import com.test.backend.compliance.domain.model.aggregates.AuditTrail;
-import com.test.backend.compliance.infrastructure.persistence.jpa.repositories.AuditTrailRepository;
-import com.test.backend.labs.infrastructure.persistence.jpa.repositories.LaboratoryRepository;
+import com.test.backend.shared.domain.model.entities.SharedEventOutbox;
+import com.test.backend.shared.infrastructure.persistence.jpa.repositories.SharedEventOutboxRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,7 +23,7 @@ public class IncidentCommandServiceImpl implements IncidentCommandService {
 
     private final IncidentRepository incidentRepository;
     private final LaboratoryRepository laboratoryRepository;
-    private final EventOutboxRepository eventOutboxRepository;
+    private final SharedEventOutboxRepository eventOutboxRepository;
     private final AuditTrailRepository auditTrailRepository;
     private final DuplicateIncidentPolicy duplicateIncidentPolicy;
     private final JWTSecurityContextAdapter jwtSecurityContextAdapter;
@@ -38,7 +31,7 @@ public class IncidentCommandServiceImpl implements IncidentCommandService {
     public IncidentCommandServiceImpl(
             IncidentRepository incidentRepository,
             LaboratoryRepository laboratoryRepository,
-            EventOutboxRepository eventOutboxRepository,
+            SharedEventOutboxRepository eventOutboxRepository,
             AuditTrailRepository auditTrailRepository,
             DuplicateIncidentPolicy duplicateIncidentPolicy,
             JWTSecurityContextAdapter jwtSecurityContextAdapter
@@ -80,14 +73,14 @@ public class IncidentCommandServiceImpl implements IncidentCommandService {
 
         // Correlation id ties every event/effect of this business transaction together.
         var correlationId = UUID.randomUUID().toString();
-        var outbox = new EventOutbox(
+        var outbox = new SharedEventOutbox(
                 "INCIDENT_CREATED",
                 "Incident",
                 String.valueOf(savedIncident.getId()),
                 "{\"incidentId\":" + savedIncident.getId() + ",\"laboratoryId\":" + laboratory.getId() + ",\"severity\":\"" + savedIncident.getSeverity() + "\"}",
                 laboratory.getWorkspace() != null ? String.valueOf(laboratory.getWorkspace().getId()) : null,
                 correlationId,
-                EventOutbox.DEFAULT_SCHEMA_VERSION
+                SharedEventOutbox.DEFAULT_SCHEMA_VERSION
         );
         eventOutboxRepository.save(outbox);
 
@@ -121,14 +114,14 @@ public class IncidentCommandServiceImpl implements IncidentCommandService {
         var savedIncident = incidentRepository.save(incident);
 
         var correlationId = UUID.randomUUID().toString();
-        var outbox = new EventOutbox(
+        var outbox = new SharedEventOutbox(
                 "INCIDENT_ACKNOWLEDGED",
                 "Incident",
                 String.valueOf(savedIncident.getId()),
                 "{\"incidentId\":" + savedIncident.getId() + ",\"status\":\"ACKNOWLEDGED\"}",
                 savedIncident.getLaboratory().getWorkspace() != null ? String.valueOf(savedIncident.getLaboratory().getWorkspace().getId()) : null,
                 correlationId,
-                EventOutbox.DEFAULT_SCHEMA_VERSION
+                SharedEventOutbox.DEFAULT_SCHEMA_VERSION
         );
         eventOutboxRepository.save(outbox);
 
@@ -163,14 +156,14 @@ public class IncidentCommandServiceImpl implements IncidentCommandService {
         var savedIncident = incidentRepository.save(incident);
 
         var correlationId = UUID.randomUUID().toString();
-        var outbox = new EventOutbox(
+        var outbox = new SharedEventOutbox(
                 "INCIDENT_RESOLVED",
                 "Incident",
                 String.valueOf(savedIncident.getId()),
                 "{\"incidentId\":" + savedIncident.getId() + ",\"technicianId\":" + command.technicianId() + "}",
                 savedIncident.getLaboratory().getWorkspace() != null ? String.valueOf(savedIncident.getLaboratory().getWorkspace().getId()) : null,
                 correlationId,
-                EventOutbox.DEFAULT_SCHEMA_VERSION
+                SharedEventOutbox.DEFAULT_SCHEMA_VERSION
         );
         eventOutboxRepository.save(outbox);
 
@@ -204,14 +197,14 @@ public class IncidentCommandServiceImpl implements IncidentCommandService {
         var savedIncident = incidentRepository.save(incident);
 
         var correlationId = UUID.randomUUID().toString();
-        var outbox = new EventOutbox(
+        var outbox = new SharedEventOutbox(
                 "INCIDENT_ESCALATED",
                 "Incident",
                 String.valueOf(savedIncident.getId()),
                 "{\"incidentId\":" + savedIncident.getId() + ",\"escalatedTo\":\"" + savedIncident.getEscalationNextRole() + "\"}",
                 savedIncident.getLaboratory().getWorkspace() != null ? String.valueOf(savedIncident.getLaboratory().getWorkspace().getId()) : null,
                 correlationId,
-                EventOutbox.DEFAULT_SCHEMA_VERSION
+                SharedEventOutbox.DEFAULT_SCHEMA_VERSION
         );
         eventOutboxRepository.save(outbox);
 
