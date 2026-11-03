@@ -3,6 +3,12 @@ package com.test.backend.telemetry.interfaces.rest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.test.backend.telemetry.domain.services.TelemetryIngestionService;
 import com.test.backend.telemetry.interfaces.rest.resources.TelemetryIngestionResource;
+import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.TelemetryIngestionIdempotencyRepository;
+import com.test.backend.telemetry.domain.model.entities.TelemetryIngestionIdempotency;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.LocalDateTime;
+import java.util.HexFormat;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -28,11 +34,17 @@ public class TelemetryIngestionController {
     private final TelemetryIngestionService telemetryIngestionService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final String apiKey;
+    private final TelemetryIngestionIdempotencyRepository idempotencyRepository;
+    private final long idempotencyTtlMinutes;
 
     public TelemetryIngestionController(TelemetryIngestionService telemetryIngestionService,
-                                        @Value("${telemetry.ingestion.api-key:}") String apiKey) {
+                                        @Value("${telemetry.ingestion.api-key:}") String apiKey,
+                                        TelemetryIngestionIdempotencyRepository idempotencyRepository,
+                                        @Value("${telemetry.idempotency.ttl-minutes:60}") long idempotencyTtlMinutes) {
         this.telemetryIngestionService = telemetryIngestionService;
         this.apiKey = apiKey;
+        this.idempotencyRepository = idempotencyRepository;
+        this.idempotencyTtlMinutes = idempotencyTtlMinutes;
     }
 
     @PostMapping
@@ -50,6 +62,7 @@ public class TelemetryIngestionController {
     })
     public ResponseEntity<Map<String, String>> ingest(
             @RequestHeader(value = "X-Api-Key", required = false) String providedApiKey,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @RequestBody TelemetryIngestionResource resource) {
 
         if (apiKey == null || apiKey.isBlank()) {
@@ -77,8 +90,33 @@ public class TelemetryIngestionController {
             ));
         }
 
+        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+            Optional<TelemetryIngestionIdempotency> existing = idempotencyRepository.findByIdempotencyKey(idempotencyKey);
+            if (existing.isPresent()) {
+                TelemetryIngestionIdempotency idem = existing.get();
+                if (idem.getExpiresAt() != null && idem.getExpiresAt().isAfter(LocalDateTime.now())) {
+                    Map<String, String> cached = new LinkedHashMap<>();
+                    cached.put("status", "ACCEPTED");
+                    cached.put("idempotent", "true");
+                    return ResponseEntity.accepted().body(cached);
+                }
+            }
+        }
+
         try {
-            telemetryIngestionService.ingest(resource.unit(), toPayload(resource));
+            String payloadJson = toPayload(resource);
+            telemetryIngestionService.ingest(resource.unit(), payloadJson);
+            if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+                TelemetryIngestionIdempotency idem = new TelemetryIngestionIdempotency();
+                idem.setIdempotencyKey(idempotencyKey);
+                idem.setUnit(resource.unit());
+                idem.setRequestHash(hash(payloadJson));
+                idem.setResponseStatus(202);
+                idem.setResponseBody("{\"status\":\"ACCEPTED\"}");
+                idem.setCreatedAt(LocalDateTime.now());
+                idem.setExpiresAt(LocalDateTime.now().plusMinutes(idempotencyTtlMinutes));
+                try { idempotencyRepository.save(idem); } catch (Exception ignored) {}
+            }
             return ResponseEntity.accepted().body(Map.of(
                     "status", "ACCEPTED",
                     "unit", resource.unit()
@@ -100,14 +138,13 @@ public class TelemetryIngestionController {
      * Rebuilds the canonical JSON payload so the HTTP transport feeds exactly
      * the same pipeline as MQTT.
      */
-    private String toPayload(TelemetryIngestionResource resource) {
+    private String hash(String s) {
         try {
-            Map<String, Object> envelope = new LinkedHashMap<>();
-            envelope.put("timestamp", resource.timestamp() != null ? resource.timestamp() : System.currentTimeMillis());
-            envelope.put("metrics", resource.metrics());
-            return objectMapper.writeValueAsString(envelope);
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] dig = md.digest(s.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(dig);
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to serialize telemetry payload", e);
+            return null;
         }
     }
 }

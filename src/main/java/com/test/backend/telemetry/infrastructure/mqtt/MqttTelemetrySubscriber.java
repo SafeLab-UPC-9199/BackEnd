@@ -1,9 +1,11 @@
 package com.test.backend.telemetry.infrastructure.mqtt;
 
-import com.test.backend.automation.domain.model.aggregates.SensorConfiguration;
-import com.test.backend.automation.infrastructure.persistence.jpa.repositories.SensorConfigurationRepository;
-import com.test.backend.telemetry.domain.services.TelemetryIngestionService;
-import com.test.backend.shared.infrastructure.persistence.configuration.MqttProperties;
+import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.TelemetryIngestionIdempotencyRepository;
+import com.test.backend.telemetry.domain.model.entities.TelemetryIngestionIdempotency;
+import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.eclipse.paho.mqttv5.client.MqttCallback;
@@ -41,19 +43,25 @@ public class MqttTelemetrySubscriber implements MqttCallback {
     private final SensorConfigurationRepository sensorConfigurationRepository;
     private final TransactionTemplate transactionTemplate;
     private final TelemetryIngestionService telemetryIngestionService;
+    private final TelemetryIngestionIdempotencyRepository idempotencyRepository;
+    private final long idempotencyTtlMinutes;
 
     public MqttTelemetrySubscriber(MqttClient client,
                                    MqttConnectionOptions connectOptions,
                                    MqttProperties mqttProperties,
                                    SensorConfigurationRepository sensorConfigurationRepository,
                                    PlatformTransactionManager transactionManager,
-                                   TelemetryIngestionService telemetryIngestionService) {
+                                   TelemetryIngestionService telemetryIngestionService,
+                                   TelemetryIngestionIdempotencyRepository idempotencyRepository,
+                                   @org.springframework.beans.factory.annotation.Value("${telemetry.idempotency.ttl-minutes:60}") long idempotencyTtlMinutes) {
         this.client = client;
         this.connectOptions = connectOptions;
         this.mqttProperties = mqttProperties;
         this.sensorConfigurationRepository = sensorConfigurationRepository;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.telemetryIngestionService = telemetryIngestionService;
+        this.idempotencyRepository = idempotencyRepository;
+        this.idempotencyTtlMinutes = idempotencyTtlMinutes;
     }
 
     @PostConstruct
@@ -77,11 +85,20 @@ public class MqttTelemetrySubscriber implements MqttCallback {
 
     private void connect() {
         try {
+            if (client.isConnected()) return;
             logger.info("Attempting to connect to MQTT broker: {}", client.getServerURI());
             client.connect(connectOptions);
             logger.info("Successfully connected to MQTT broker.");
         } catch (MqttException e) {
-            logger.error("Failed to connect to MQTT broker. Single attempt finished (will not retry to avoid log spam).", e);
+            logger.error("Failed to connect to MQTT broker. Will retry with automatic reconnect.", e);
+            try {
+                Thread.sleep(2000);
+                if (!client.isConnected()) {
+                    client.connect(connectOptions);
+                }
+            } catch (Exception ex) {
+                logger.warn("MQTT reconnect attempt failed: {}", ex.getMessage());
+            }
         }
     }
 
@@ -140,7 +157,28 @@ public class MqttTelemetrySubscriber implements MqttCallback {
                 }
             } else if ("data".equalsIgnoreCase(type)) {
                 try {
+                    String idemKey = "mqtt:" + unit + ":" + hash(payload);
+                    if (idemKey != null) {
+                        var existing = idempotencyRepository.findByIdempotencyKey(idemKey);
+                        if (existing.isPresent() && existing.get().getExpiresAt() != null && existing.get().getExpiresAt().isAfter(LocalDateTime.now())) {
+                            logger.debug("Skipping duplicate MQTT message for unit {}", unit);
+                            return;
+                        }
+                    }
                     telemetryIngestionService.ingest(unit, payload);
+                    if (idemKey != null) {
+                        try {
+                            TelemetryIngestionIdempotency idem = new TelemetryIngestionIdempotency();
+                            idem.setIdempotencyKey(idemKey);
+                            idem.setUnit(unit);
+                            idem.setRequestHash(hash(payload));
+                            idem.setResponseStatus(202);
+                            idem.setResponseBody("{\"status\":\"ACCEPTED\"}");
+                            idem.setCreatedAt(LocalDateTime.now());
+                            idem.setExpiresAt(LocalDateTime.now().plusMinutes(idempotencyTtlMinutes));
+                            idempotencyRepository.save(idem);
+                        } catch (Exception ignored) {}
+                    }
                 } catch (IllegalArgumentException e) {
                     logger.warn("Rejected MQTT telemetry on topic '{}': {}", topic, e.getMessage());
                 }
@@ -153,5 +191,15 @@ public class MqttTelemetrySubscriber implements MqttCallback {
     @Override
     public void deliveryComplete(IMqttToken token) {
         // No-op (we only subscribe)
+    }
+
+    private String hash(String s) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] dig = md.digest(s.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(dig);
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

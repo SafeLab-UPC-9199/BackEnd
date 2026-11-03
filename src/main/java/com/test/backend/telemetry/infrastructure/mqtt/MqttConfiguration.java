@@ -55,8 +55,9 @@ public class MqttConfiguration {
         MqttConnectionOptions options = new MqttConnectionOptions();
         options.setAutomaticReconnect(true);
         options.setCleanStart(true);
-        options.setConnectionTimeout(30);
+        options.setConnectionTimeout(10);
         options.setKeepAliveInterval(60);
+        options.setMaxReconnectDelay(5000);
 
         if (mqttProperties.getUsername() != null && !mqttProperties.getUsername().isEmpty()) {
             options.setUserName(mqttProperties.getUsername());
@@ -66,7 +67,9 @@ public class MqttConfiguration {
         }
 
         if (protocol != null && (protocol.equalsIgnoreCase("mqtts") || protocol.equalsIgnoreCase("ssl"))) {
-            options.setSocketFactory(SSLSocketFactory.getDefault());
+            try {
+                options.setSocketFactory(javax.net.ssl.SSLSocketFactory.getDefault());
+            } catch (Exception ignored) {}
         }
         return options;
     }
