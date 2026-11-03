@@ -1,15 +1,26 @@
 package com.test.backend.telemetry.infrastructure.mqtt;
 
 import com.test.backend.shared.infrastructure.persistence.configuration.MqttProperties;
-import org.eclipse.paho.client.mqttv3.MqttClient;
-import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
-import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
+import org.eclipse.paho.mqttv5.client.MqttClient;
+import org.eclipse.paho.mqttv5.client.MqttConnectionOptions;
+import org.eclipse.paho.mqttv5.client.persist.MemoryPersistence;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import javax.net.ssl.SSLSocketFactory;
+import java.util.UUID;
 
+/**
+ * MQTT v5 client configuration.
+ *
+ * Protocol is configurable through {@code mqtt.protocol}:
+ * - {@code mqtts}/{@code ssl} → TLS (ssl://host:port, default trust store)
+ * - {@code tcp} (default)     → plain text
+ *
+ * The v5 client always speaks MQTT 5.0; if a broker only supports 3.1.1 the
+ * connection must be pointed at such broker via configuration (no code change).
+ */
 @Configuration
 public class MqttConfiguration {
 
@@ -24,7 +35,7 @@ public class MqttConfiguration {
     public MqttClient mqttClient() throws Exception {
         String protocol = mqttProperties.getProtocol();
         if (protocol == null) protocol = "tcp";
-        
+
         String serverUri;
         if (protocol.equalsIgnoreCase("mqtts") || protocol.equalsIgnoreCase("ssl")) {
             serverUri = "ssl://" + mqttProperties.getHost() + ":" + mqttProperties.getPort();
@@ -32,17 +43,18 @@ public class MqttConfiguration {
             serverUri = "tcp://" + mqttProperties.getHost() + ":" + mqttProperties.getPort();
         }
 
-        String clientId = "SafeLab_Backend_" + MqttClient.generateClientId();
+        // The v5 client has no generateClientId(); build our own stable-unique id.
+        String clientId = "SafeLab_Backend_" + UUID.randomUUID();
         return new MqttClient(serverUri, clientId, new MemoryPersistence());
     }
-    
+
     @Bean
     @ConditionalOnProperty(prefix = "mqtt", name = "enabled", havingValue = "true")
-    public MqttConnectOptions mqttConnectOptions() {
+    public MqttConnectionOptions mqttConnectionOptions() {
         String protocol = mqttProperties.getProtocol();
-        MqttConnectOptions options = new MqttConnectOptions();
+        MqttConnectionOptions options = new MqttConnectionOptions();
         options.setAutomaticReconnect(true);
-        options.setCleanSession(true);
+        options.setCleanStart(true);
         options.setConnectionTimeout(30);
         options.setKeepAliveInterval(60);
 
@@ -50,7 +62,7 @@ public class MqttConfiguration {
             options.setUserName(mqttProperties.getUsername());
         }
         if (mqttProperties.getPassword() != null && !mqttProperties.getPassword().isEmpty()) {
-            options.setPassword(mqttProperties.getPassword().toCharArray());
+            options.setPassword(mqttProperties.getPassword().getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
 
         if (protocol != null && (protocol.equalsIgnoreCase("mqtts") || protocol.equalsIgnoreCase("ssl"))) {

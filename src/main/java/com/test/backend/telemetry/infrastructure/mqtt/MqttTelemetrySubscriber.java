@@ -6,7 +6,14 @@ import com.test.backend.telemetry.domain.services.TelemetryIngestionService;
 import com.test.backend.shared.infrastructure.persistence.configuration.MqttProperties;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
-import org.eclipse.paho.client.mqttv3.*;
+import org.eclipse.paho.mqttv5.client.MqttCallback;
+import org.eclipse.paho.mqttv5.client.MqttClient;
+import org.eclipse.paho.mqttv5.client.MqttConnectionOptions;
+import org.eclipse.paho.mqttv5.client.MqttDisconnectResponse;
+import org.eclipse.paho.mqttv5.client.IMqttToken;
+import org.eclipse.paho.mqttv5.common.MqttException;
+import org.eclipse.paho.mqttv5.common.MqttMessage;
+import org.eclipse.paho.mqttv5.common.packet.MqttProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -24,19 +31,19 @@ import java.util.Optional;
  */
 @Service
 @ConditionalOnProperty(prefix = "mqtt", name = "enabled", havingValue = "true")
-public class MqttTelemetrySubscriber implements MqttCallbackExtended {
+public class MqttTelemetrySubscriber implements MqttCallback {
 
     private static final Logger logger = LoggerFactory.getLogger(MqttTelemetrySubscriber.class);
 
     private final MqttClient client;
-    private final MqttConnectOptions connectOptions;
+    private final MqttConnectionOptions connectOptions;
     private final MqttProperties mqttProperties;
     private final SensorConfigurationRepository sensorConfigurationRepository;
     private final TransactionTemplate transactionTemplate;
     private final TelemetryIngestionService telemetryIngestionService;
 
     public MqttTelemetrySubscriber(MqttClient client,
-                                   MqttConnectOptions connectOptions,
+                                   MqttConnectionOptions connectOptions,
                                    MqttProperties mqttProperties,
                                    SensorConfigurationRepository sensorConfigurationRepository,
                                    PlatformTransactionManager transactionManager,
@@ -90,8 +97,19 @@ public class MqttTelemetrySubscriber implements MqttCallbackExtended {
     }
 
     @Override
-    public void connectionLost(Throwable cause) {
-        logger.warn("MQTT connection lost! Reconnecting automatically...", cause);
+    public void disconnected(MqttDisconnectResponse disconnectResponse) {
+        logger.warn("MQTT connection lost (reason: {}). Reconnecting automatically...",
+                disconnectResponse.getReturnCode());
+    }
+
+    @Override
+    public void mqttErrorOccurred(MqttException exception) {
+        logger.error("MQTT client error occurred", exception);
+    }
+
+    @Override
+    public void authPacketArrived(int reasonCode, MqttProperties properties) {
+        // No enhanced authentication configured — nothing to do.
     }
 
     @Override
@@ -133,7 +151,7 @@ public class MqttTelemetrySubscriber implements MqttCallbackExtended {
     }
 
     @Override
-    public void deliveryComplete(IMqttDeliveryToken token) {
+    public void deliveryComplete(IMqttToken token) {
         // No-op (we only subscribe)
     }
 }
