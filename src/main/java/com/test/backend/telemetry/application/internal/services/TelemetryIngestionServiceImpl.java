@@ -19,7 +19,12 @@ import com.test.backend.labs.domain.model.entities.LabMetric;
 import com.test.backend.labs.domain.model.entities.LabMetricSubscription;
 import com.test.backend.labs.domain.model.valueobjets.NotificationPreferences;
 import com.test.backend.labs.infrastructure.persistence.jpa.repositories.LaboratoryRepository;
+import com.test.backend.telemetry.domain.model.aggregates.MetricType;
+import com.test.backend.telemetry.domain.model.aggregates.SensorReading;
 import com.test.backend.telemetry.domain.model.events.TemperatureReadingRecorded;
+import com.test.backend.telemetry.domain.services.TelemetryIngestionService;
+import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.MetricTypeRepository;
+import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.SensorReadingRepository;
 import org.springframework.context.ApplicationEventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -159,14 +164,22 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
             reading.setRecordedAt(recordedAt);
             sensorReadingRepository.save(reading);
 
+            // Resolve threshold context once: shared by the domain event below
+            // and by the alert evaluation performed in updateRealTimeLabMetric.
+            ThresholdContext thresholds = resolveThresholds(lab, metricType, sensor);
+
             // Publish domain event for decoupling (Iteration 1)
             try {
                 applicationEventPublisher.publishEvent(new TemperatureReadingRecorded(
                         reading.getId(),
                         lab.getId(),
                         metricType.getId(),
+                        metricType.getKey(),
                         val,
-                        recordedAt
+                        recordedAt,
+                        thresholds.min(),
+                        thresholds.max(),
+                        lab.getName()
                 ));
             } catch (Exception ex) {
                 logger.debug("Failed to publish TemperatureReadingRecorded event: {}", ex.getMessage());
@@ -213,16 +226,17 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
     }
 
     /**
-     * Evaluates thresholds using the LabMetricSubscription relationship.
-     * No more contains()-based string matching — uses exact MetricType reference.
+     * Threshold context resolved from the sensor's equipment, its own limits or
+     * the laboratory metric subscription, in that priority order.
      */
-    private void evaluateThresholds(Laboratory lab, MetricType metricType, Double val, LabMetric metric, SensorConfiguration sensor) {
+    private record ThresholdContext(Double min, Double max, Double warning, String targetName) {}
+
+    private ThresholdContext resolveThresholds(Laboratory lab, MetricType metricType, SensorConfiguration sensor) {
         Double minThreshold = null;
         Double maxThreshold = null;
         Double warningThreshold = null;
         String targetName = "";
 
-        // Resolve thresholds
         EquipmentThreshold equip = sensor.getEquipment();
         if (equip != null) {
             minThreshold = equip.getMinThreshold();
@@ -245,6 +259,20 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
                 targetName = "laboratory ambient";
             }
         }
+
+        return new ThresholdContext(minThreshold, maxThreshold, warningThreshold, targetName);
+    }
+
+    /**
+     * Evaluates thresholds using the LabMetricSubscription relationship.
+     * No more contains()-based string matching — uses exact MetricType reference.
+     */
+    private void evaluateThresholds(Laboratory lab, MetricType metricType, Double val, LabMetric metric, SensorConfiguration sensor) {
+        ThresholdContext thresholds = resolveThresholds(lab, metricType, sensor);
+        Double minThreshold = thresholds.min();
+        Double maxThreshold = thresholds.max();
+        Double warningThreshold = thresholds.warning();
+        String targetName = thresholds.targetName();
 
         if (minThreshold == null && maxThreshold == null) {
             metric.setStatus("NORMAL");

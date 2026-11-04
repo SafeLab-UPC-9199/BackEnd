@@ -1,5 +1,6 @@
 package com.test.backend.telemetry.interfaces.rest;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.test.backend.telemetry.domain.services.TelemetryIngestionService;
 import com.test.backend.telemetry.interfaces.rest.resources.TelemetryIngestionResource;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * HTTP ingestion endpoint (Iteration 1): alternative transport for edge
@@ -113,7 +115,6 @@ public class TelemetryIngestionController {
                 idem.setRequestHash(hash(payloadJson));
                 idem.setResponseStatus(202);
                 idem.setResponseBody("{\"status\":\"ACCEPTED\"}");
-                idem.setCreatedAt(LocalDateTime.now());
                 idem.setExpiresAt(LocalDateTime.now().plusMinutes(idempotencyTtlMinutes));
                 try { idempotencyRepository.save(idem); } catch (Exception ignored) {}
             }
@@ -138,6 +139,16 @@ public class TelemetryIngestionController {
      * Rebuilds the canonical JSON payload so the HTTP transport feeds exactly
      * the same pipeline as MQTT.
      */
+    private String toPayload(TelemetryIngestionResource resource) throws JsonProcessingException {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("unit", resource.unit());
+        if (resource.timestamp() != null) {
+            payload.put("timestamp", resource.timestamp());
+        }
+        payload.put("metrics", resource.metrics());
+        return objectMapper.writeValueAsString(payload);
+    }
+
     private String hash(String s) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");

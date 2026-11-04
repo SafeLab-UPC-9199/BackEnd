@@ -42,6 +42,5 @@ public class TelemetryIngestionIdempotency extends AuditableModel {
     @Column(name = "expires_at", nullable = false)
     private LocalDateTime expiresAt;
 
-    @Column(name = "created_at", nullable = false)
-    private LocalDateTime createdAt;
+    // createdAt is inherited from AuditableModel (populated by JPA auditing).
 }
