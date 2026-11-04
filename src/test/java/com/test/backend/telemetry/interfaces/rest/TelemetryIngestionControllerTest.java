@@ -1,15 +1,18 @@
 package com.test.backend.telemetry.interfaces.rest;
 
+import com.test.backend.telemetry.domain.model.entities.TelemetryIngestionIdempotency;
 import com.test.backend.telemetry.domain.services.TelemetryIngestionService;
 import com.test.backend.telemetry.interfaces.rest.resources.TelemetryIngestionResource;
+import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.TelemetryIngestionIdempotencyRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -24,11 +27,11 @@ class TelemetryIngestionControllerTest {
     @Mock
     private TelemetryIngestionService telemetryIngestionService;
 
-    @InjectMocks
-    private TelemetryIngestionController controller;
+    @Mock
+    private TelemetryIngestionIdempotencyRepository idempotencyRepository;
 
     private TelemetryIngestionController controllerWithKey(String key) {
-        return new TelemetryIngestionController(telemetryIngestionService, key);
+        return new TelemetryIngestionController(telemetryIngestionService, key, idempotencyRepository, 60L);
     }
 
     private TelemetryIngestionResource validResource() {
@@ -42,7 +45,7 @@ class TelemetryIngestionControllerTest {
         var c = controllerWithKey("");
 
         // Act
-        var response = c.ingest(API_KEY, validResource());
+        var response = c.ingest(API_KEY, null, validResource());
 
         // Assert
         assertEquals(503, response.getStatusCode().value());
@@ -56,8 +59,8 @@ class TelemetryIngestionControllerTest {
         var c = controllerWithKey(API_KEY);
 
         // Act & Assert
-        assertEquals(401, c.ingest(null, validResource()).getStatusCode().value());
-        assertEquals(401, c.ingest("wrong-key", validResource()).getStatusCode().value());
+        assertEquals(401, c.ingest(null, null, validResource()).getStatusCode().value());
+        assertEquals(401, c.ingest("wrong-key", null, validResource()).getStatusCode().value());
         verifyNoInteractions(telemetryIngestionService);
     }
 
@@ -69,7 +72,7 @@ class TelemetryIngestionControllerTest {
         var resource = new TelemetryIngestionResource("  ", null, Map.of("temperature", 5.4));
 
         // Act
-        var response = c.ingest(API_KEY, resource);
+        var response = c.ingest(API_KEY, null, resource);
 
         // Assert
         assertEquals(400, response.getStatusCode().value());
@@ -84,7 +87,7 @@ class TelemetryIngestionControllerTest {
         var resource = new TelemetryIngestionResource("Lab-04", null, Map.of());
 
         // Act
-        var response = c.ingest(API_KEY, resource);
+        var response = c.ingest(API_KEY, null, resource);
 
         // Assert
         assertEquals(400, response.getStatusCode().value());
@@ -100,7 +103,7 @@ class TelemetryIngestionControllerTest {
                 .when(telemetryIngestionService).ingest(eq("NOPE"), any());
 
         // Act
-        var response = c.ingest(API_KEY, new TelemetryIngestionResource("NOPE", null, Map.of("temperature", 1.0)));
+        var response = c.ingest(API_KEY, null, new TelemetryIngestionResource("NOPE", null, Map.of("temperature", 1.0)));
 
         // Assert
         assertEquals(404, response.getStatusCode().value());
@@ -113,12 +116,54 @@ class TelemetryIngestionControllerTest {
         var c = controllerWithKey(API_KEY);
 
         // Act
-        var response = c.ingest(API_KEY, validResource());
+        var response = c.ingest(API_KEY, null, validResource());
 
         // Assert
         assertEquals(202, response.getStatusCode().value());
         verify(telemetryIngestionService).ingest(eq("Lab-04"), argThat(payload ->
                 payload.contains("\"timestamp\":1712345678900")
                         && payload.contains("\"temperature\":5.4")));
+    }
+
+    @Test
+    @DisplayName("ingest returns cached 202 without delegating when Idempotency-Key already exists (AAA)")
+    void ingest_ShouldReturnCachedResponse_WhenIdempotencyKeyReplay() {
+        // Arrange
+        var c = controllerWithKey(API_KEY);
+        var existing = new TelemetryIngestionIdempotency();
+        existing.setIdempotencyKey("key-1");
+        existing.setUnit("Lab-04");
+        existing.setExpiresAt(LocalDateTime.now().plusHours(1));
+        when(idempotencyRepository.findByIdempotencyKey("key-1")).thenReturn(Optional.of(existing));
+
+        // Act
+        var response = c.ingest(API_KEY, "key-1", validResource());
+
+        // Assert
+        assertEquals(202, response.getStatusCode().value());
+        assertEquals("true", response.getBody().get("idempotent"));
+        verifyNoInteractions(telemetryIngestionService);
+        verify(idempotencyRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("ingest persists an idempotency record when the key is new (AAA)")
+    void ingest_ShouldPersistIdempotencyRecord_WhenKeyIsNew() {
+        // Arrange
+        var c = controllerWithKey(API_KEY);
+        when(idempotencyRepository.findByIdempotencyKey("key-2")).thenReturn(Optional.empty());
+
+        // Act
+        var response = c.ingest(API_KEY, "key-2", validResource());
+
+        // Assert
+        assertEquals(202, response.getStatusCode().value());
+        verify(telemetryIngestionService).ingest(eq("Lab-04"), any());
+        verify(idempotencyRepository).save(argThat(idem ->
+                "key-2".equals(idem.getIdempotencyKey())
+                        && "Lab-04".equals(idem.getUnit())
+                        && idem.getRequestHash() != null
+                        && idem.getExpiresAt() != null
+                        && idem.getExpiresAt().isAfter(LocalDateTime.now())));
     }
 }
