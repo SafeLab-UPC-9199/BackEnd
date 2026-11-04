@@ -6,7 +6,6 @@ import com.resend.services.emails.model.CreateEmailResponse;
 import com.test.backend.iam.application.internal.outboundservices.email.EmailService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -15,17 +14,10 @@ public class ResendEmailServiceImpl implements EmailService {
 
     private static final Logger logger = LoggerFactory.getLogger(ResendEmailServiceImpl.class);
 
-    private final Resend resend;
-    private final String apiKey;
+    private final ResendClient resendClient;
 
-    public ResendEmailServiceImpl(@Value("${resend.api-key}") String apiKey) {
-        this.apiKey = apiKey;
-        if (apiKey == null || apiKey.trim().isEmpty()) {
-            logger.error("RESEND CONFIG ERROR: API Key is null or empty!");
-        } else {
-            logger.info("Resend API Key loaded successfully. Value: {}...", apiKey.substring(0, Math.min(apiKey.length(), 10)));
-        }
-        this.resend = new Resend(apiKey);
+    public ResendEmailServiceImpl(ResendClient resendClient) {
+        this.resendClient = resendClient;
     }
 
     @Override
@@ -50,7 +42,7 @@ public class ResendEmailServiceImpl implements EmailService {
                 .build();
 
         try {
-            CreateEmailResponse response = resend.emails().send(sendEmailRequest);
+            CreateEmailResponse response = resendClient.send(sendEmailRequest);
             logger.info("Verification email sent to {} successfully. Response ID: {}", toEmail, response.getId());
         } catch (Exception e) {
             logger.error("Failed to send verification email to {} via Resend", toEmail, e);
@@ -91,7 +83,7 @@ public class ResendEmailServiceImpl implements EmailService {
                 .build();
 
         try {
-            CreateEmailResponse response = resend.emails().send(sendEmailRequest);
+            CreateEmailResponse response = resendClient.send(sendEmailRequest);
             logger.info("Alert notification email sent to {} successfully. Response ID: {}", toEmail, response.getId());
         } catch (Exception e) {
             logger.error("Failed to send alert notification email to {} via Resend", toEmail, e);

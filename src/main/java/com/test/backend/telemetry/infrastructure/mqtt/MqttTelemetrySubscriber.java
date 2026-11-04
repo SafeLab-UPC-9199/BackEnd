@@ -3,6 +3,7 @@ package com.test.backend.telemetry.infrastructure.mqtt;
 import com.test.backend.automation.domain.model.aggregates.SensorConfiguration;
 import com.test.backend.automation.infrastructure.persistence.jpa.repositories.SensorConfigurationRepository;
 import com.test.backend.shared.infrastructure.persistence.configuration.MqttProperties;
+import com.test.backend.telemetry.domain.model.events.SensorUnavailable;
 import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.TelemetryIngestionIdempotencyRepository;
 import com.test.backend.telemetry.domain.model.entities.TelemetryIngestionIdempotency;
 import com.test.backend.telemetry.domain.services.TelemetryIngestionService;
@@ -22,6 +23,7 @@ import org.eclipse.paho.mqttv5.common.MqttMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -47,6 +49,7 @@ public class MqttTelemetrySubscriber implements MqttCallback {
     private final TransactionTemplate transactionTemplate;
     private final TelemetryIngestionService telemetryIngestionService;
     private final TelemetryIngestionIdempotencyRepository idempotencyRepository;
+    private final ApplicationEventPublisher applicationEventPublisher;
     private final long idempotencyTtlMinutes;
 
     public MqttTelemetrySubscriber(MqttClient client,
@@ -56,6 +59,7 @@ public class MqttTelemetrySubscriber implements MqttCallback {
                                    PlatformTransactionManager transactionManager,
                                    TelemetryIngestionService telemetryIngestionService,
                                    TelemetryIngestionIdempotencyRepository idempotencyRepository,
+                                   ApplicationEventPublisher applicationEventPublisher,
                                    @org.springframework.beans.factory.annotation.Value("${telemetry.idempotency.ttl-minutes:60}") long idempotencyTtlMinutes) {
         this.client = client;
         this.connectOptions = connectOptions;
@@ -64,6 +68,7 @@ public class MqttTelemetrySubscriber implements MqttCallback {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.telemetryIngestionService = telemetryIngestionService;
         this.idempotencyRepository = idempotencyRepository;
+        this.applicationEventPublisher = applicationEventPublisher;
         this.idempotencyTtlMinutes = idempotencyTtlMinutes;
     }
 
@@ -150,11 +155,18 @@ public class MqttTelemetrySubscriber implements MqttCallback {
                 if ("OFFLINE".equalsIgnoreCase(payload)) {
                     transactionTemplate.executeWithoutResult(status -> {
                         Optional<SensorConfiguration> sensorOpt = sensorConfigurationRepository.findByUnit(unit);
+                        String sensorName = sensorOpt.map(SensorConfiguration::getSensorName).orElse(null);
                         if (sensorOpt.isPresent()) {
                             SensorConfiguration sensor = sensorOpt.get();
                             sensor.setStatus("OFFLINE");
                             sensorConfigurationRepository.save(sensor);
                             logger.info("Sensor unit '{}' is now OFFLINE (LWT).", unit);
+                        }
+                        try {
+                            applicationEventPublisher.publishEvent(new SensorUnavailable(
+                                    unit, sensorName, LocalDateTime.now()));
+                        } catch (Exception ex) {
+                            logger.debug("Failed to publish SensorUnavailable event: {}", ex.getMessage());
                         }
                     });
                 }

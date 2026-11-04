@@ -21,6 +21,7 @@ import com.test.backend.labs.domain.model.valueobjets.NotificationPreferences;
 import com.test.backend.labs.infrastructure.persistence.jpa.repositories.LaboratoryRepository;
 import com.test.backend.telemetry.domain.model.aggregates.MetricType;
 import com.test.backend.telemetry.domain.model.aggregates.SensorReading;
+import com.test.backend.telemetry.domain.model.events.ReadingRejected;
 import com.test.backend.telemetry.domain.model.events.TemperatureReadingRecorded;
 import com.test.backend.telemetry.domain.services.TelemetryIngestionService;
 import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.MetricTypeRepository;
@@ -86,9 +87,23 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
         Optional<SensorConfiguration> sensorOpt = sensorConfigurationRepository.findByUnit(unit);
         if (sensorOpt.isEmpty()) {
             logger.warn("Security warning: received telemetry for unregistered sensor unit '{}'", unit);
+            publishRejection(unit, "Unregistered sensor unit");
             throw new IllegalArgumentException("Unregistered sensor unit: " + unit);
         }
         processTelemetryData(sensorOpt.get(), payload);
+    }
+
+    /**
+     * Emits a {@link ReadingRejected} event so rejected frames are observable
+     * (Iteration 1). Never throws: observability must not break ingestion.
+     */
+    private void publishRejection(String unit, String reason) {
+        try {
+            applicationEventPublisher.publishEvent(new ReadingRejected(
+                    unit, reason, LocalDateTime.now(java.time.ZoneOffset.UTC)));
+        } catch (Exception ex) {
+            logger.debug("Failed to publish ReadingRejected event: {}", ex.getMessage());
+        }
     }
 
     private void processTelemetryData(SensorConfiguration sensor, String payload) {
@@ -98,6 +113,7 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
             Map<String, Object> parsed = objectMapper.readValue(payload, Map.class);
             data = parsed;
         } catch (Exception e) {
+            publishRejection(sensor.getUnit(), "Malformed JSON payload");
             throw new IllegalStateException("Invalid telemetry payload: " + e.getMessage(), e);
         }
 
@@ -117,6 +133,7 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
         @SuppressWarnings("unchecked")
         Map<String, Object> metrics = (Map<String, Object>) data.get("metrics");
         if (metrics == null || metrics.isEmpty()) {
+            publishRejection(sensor.getUnit(), "Missing or empty metrics");
             return;
         }
 
@@ -135,6 +152,7 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
 
         if (lab == null) {
             logger.warn("Could not find any Laboratory to associate telemetry for sensor '{}'", sensor.getSensorName());
+            publishRejection(sensor.getUnit(), "No laboratory association");
             return;
         }
 
@@ -151,6 +169,7 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
             Optional<MetricType> metricTypeOpt = metricTypeRepository.findByKey(key);
             if (metricTypeOpt.isEmpty()) {
                 logger.warn("Unknown metric key '{}' from sensor '{}' — ignoring. Register it in metric_types first.", key, sensor.getSensorName());
+                publishRejection(sensor.getUnit(), "Unknown metric key: " + key);
                 continue;
             }
             MetricType metricType = metricTypeOpt.get();

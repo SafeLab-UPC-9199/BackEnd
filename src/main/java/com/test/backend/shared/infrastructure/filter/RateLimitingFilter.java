@@ -33,7 +33,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         String path = request.getRequestURI();
-        if (path != null && path.contains("/api/v1/telemetry/ingest")) {
+        if (path != null && (path.equals("/api/v1/telemetry/ingestion") || path.endsWith("/api/v1/telemetry/ingestion"))) {
             String apiKey = request.getHeader("X-Api-Key");
             String key = apiKey != null && !apiKey.isBlank() ? "ingest:" + apiKey : "ingest:ip:" + request.getRemoteAddr();
             Bucket bucket = resolveBucket(key);

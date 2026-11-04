@@ -1,8 +1,6 @@
 package com.test.backend.telemetry.interfaces.rest;
 
-import com.test.backend.telemetry.domain.model.entities.TelemetryIngestionIdempotency;
 import com.test.backend.telemetry.domain.services.TelemetryIngestionService;
-import com.test.backend.telemetry.interfaces.rest.resources.TelemetryIngestionResource;
 import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.TelemetryIngestionIdempotencyRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -10,9 +8,15 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.Optional;
+
+import com.test.backend.telemetry.domain.model.entities.TelemetryIngestionIdempotency;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -23,6 +27,7 @@ import static org.mockito.Mockito.*;
 class TelemetryIngestionControllerTest {
 
     private static final String API_KEY = "test-ingestion-key";
+    private static final String HMAC_SECRET = "unit-test-hmac-secret";
 
     @Mock
     private TelemetryIngestionService telemetryIngestionService;
@@ -30,22 +35,37 @@ class TelemetryIngestionControllerTest {
     @Mock
     private TelemetryIngestionIdempotencyRepository idempotencyRepository;
 
-    private TelemetryIngestionController controllerWithKey(String key) {
-        return new TelemetryIngestionController(telemetryIngestionService, key, idempotencyRepository, 60L);
+    private TelemetryIngestionController controllerWith(String key, String hmacSecret) {
+        return new TelemetryIngestionController(telemetryIngestionService, key, hmacSecret,
+                idempotencyRepository, 60L);
     }
 
-    private TelemetryIngestionResource validResource() {
-        return new TelemetryIngestionResource("Lab-04", 1712345678900L, Map.of("temperature", 5.4));
+    private TelemetryIngestionController controllerWithKey(String key) {
+        return controllerWith(key, "");
+    }
+
+    private String validBody() {
+        return "{\"unit\":\"Lab-04\",\"timestamp\":1712345678900,\"metrics\":{\"temperature\":5.4}}";
+    }
+
+    private static String sign(String secret, String body) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            return HexFormat.of().formatHex(mac.doFinal(body.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     @Test
     @DisplayName("ingest returns 503 when API key is not configured (AAA)")
     void ingest_ShouldReturnServiceUnavailable_WhenKeyNotConfigured() {
         // Arrange
-        var c = controllerWithKey("");
+        var c = controllerWith("", "");
 
         // Act
-        var response = c.ingest(API_KEY, null, validResource());
+        var response = c.ingest(API_KEY, null, null, validBody());
 
         // Assert
         assertEquals(503, response.getStatusCode().value());
@@ -59,8 +79,8 @@ class TelemetryIngestionControllerTest {
         var c = controllerWithKey(API_KEY);
 
         // Act & Assert
-        assertEquals(401, c.ingest(null, null, validResource()).getStatusCode().value());
-        assertEquals(401, c.ingest("wrong-key", null, validResource()).getStatusCode().value());
+        assertEquals(401, c.ingest(null, null, null, validBody()).getStatusCode().value());
+        assertEquals(401, c.ingest("wrong-key", null, null, validBody()).getStatusCode().value());
         verifyNoInteractions(telemetryIngestionService);
     }
 
@@ -69,10 +89,10 @@ class TelemetryIngestionControllerTest {
     void ingest_ShouldReturnBadRequest_WhenUnitMissing() {
         // Arrange
         var c = controllerWithKey(API_KEY);
-        var resource = new TelemetryIngestionResource("  ", null, Map.of("temperature", 5.4));
+        var body = "{\"unit\":\"  \",\"metrics\":{\"temperature\":5.4}}";
 
         // Act
-        var response = c.ingest(API_KEY, null, resource);
+        var response = c.ingest(API_KEY, null, null, body);
 
         // Assert
         assertEquals(400, response.getStatusCode().value());
@@ -84,10 +104,24 @@ class TelemetryIngestionControllerTest {
     void ingest_ShouldReturnBadRequest_WhenMetricsEmpty() {
         // Arrange
         var c = controllerWithKey(API_KEY);
-        var resource = new TelemetryIngestionResource("Lab-04", null, Map.of());
+        var body = "{\"unit\":\"Lab-04\",\"metrics\":{}}";
 
         // Act
-        var response = c.ingest(API_KEY, null, resource);
+        var response = c.ingest(API_KEY, null, null, body);
+
+        // Assert
+        assertEquals(400, response.getStatusCode().value());
+        verifyNoInteractions(telemetryIngestionService);
+    }
+
+    @Test
+    @DisplayName("ingest returns 400 when the body is not valid JSON (AAA)")
+    void ingest_ShouldReturnBadRequest_WhenBodyMalformed() {
+        // Arrange
+        var c = controllerWithKey(API_KEY);
+
+        // Act
+        var response = c.ingest(API_KEY, null, null, "{oops");
 
         // Assert
         assertEquals(400, response.getStatusCode().value());
@@ -103,26 +137,71 @@ class TelemetryIngestionControllerTest {
                 .when(telemetryIngestionService).ingest(eq("NOPE"), any());
 
         // Act
-        var response = c.ingest(API_KEY, null, new TelemetryIngestionResource("NOPE", null, Map.of("temperature", 1.0)));
+        var response = c.ingest(API_KEY, null, null,
+                "{\"unit\":\"NOPE\",\"metrics\":{\"temperature\":1.0}}");
 
         // Assert
         assertEquals(404, response.getStatusCode().value());
     }
 
     @Test
-    @DisplayName("ingest returns 202 and delegates canonical payload when key valid (AAA)")
+    @DisplayName("ingest returns 202 and delegates the raw frame when key valid (AAA)")
     void ingest_ShouldReturnAcceptedAndDelegate_WhenKeyValid() {
         // Arrange
         var c = controllerWithKey(API_KEY);
 
         // Act
-        var response = c.ingest(API_KEY, null, validResource());
+        var response = c.ingest(API_KEY, null, null, validBody());
 
         // Assert
         assertEquals(202, response.getStatusCode().value());
         verify(telemetryIngestionService).ingest(eq("Lab-04"), argThat(payload ->
                 payload.contains("\"timestamp\":1712345678900")
                         && payload.contains("\"temperature\":5.4")));
+    }
+
+    @Test
+    @DisplayName("ingest returns 401 when signature is required but missing (AAA)")
+    void ingest_ShouldReturnUnauthorized_WhenSignatureMissing() {
+        // Arrange
+        var c = controllerWith(API_KEY, HMAC_SECRET);
+
+        // Act
+        var response = c.ingest(API_KEY, null, null, validBody());
+
+        // Assert
+        assertEquals(401, response.getStatusCode().value());
+        assertTrue(response.getBody().get("message").contains("X-Signature"));
+        verifyNoInteractions(telemetryIngestionService);
+    }
+
+    @Test
+    @DisplayName("ingest returns 401 when the device signature is wrong (AAA)")
+    void ingest_ShouldReturnUnauthorized_WhenSignatureInvalid() {
+        // Arrange
+        var c = controllerWith(API_KEY, HMAC_SECRET);
+
+        // Act
+        var response = c.ingest(API_KEY, null, "deadbeef", validBody());
+
+        // Assert
+        assertEquals(401, response.getStatusCode().value());
+        verifyNoInteractions(telemetryIngestionService);
+    }
+
+    @Test
+    @DisplayName("ingest returns 202 when the device signature is valid (AAA)")
+    void ingest_ShouldReturnAccepted_WhenSignatureValid() {
+        // Arrange
+        var c = controllerWith(API_KEY, HMAC_SECRET);
+        var signature = sign(HMAC_SECRET, validBody());
+
+        // Act
+        var response = c.ingest(API_KEY, null, signature, validBody());
+
+        // Assert
+        assertEquals(202, response.getStatusCode().value());
+        verify(telemetryIngestionService).ingest(eq("Lab-04"), any());
     }
 
     @Test
@@ -137,7 +216,7 @@ class TelemetryIngestionControllerTest {
         when(idempotencyRepository.findByIdempotencyKey("key-1")).thenReturn(Optional.of(existing));
 
         // Act
-        var response = c.ingest(API_KEY, "key-1", validResource());
+        var response = c.ingest(API_KEY, "key-1", null, validBody());
 
         // Assert
         assertEquals(202, response.getStatusCode().value());
@@ -154,7 +233,7 @@ class TelemetryIngestionControllerTest {
         when(idempotencyRepository.findByIdempotencyKey("key-2")).thenReturn(Optional.empty());
 
         // Act
-        var response = c.ingest(API_KEY, "key-2", validResource());
+        var response = c.ingest(API_KEY, "key-2", null, validBody());
 
         // Assert
         assertEquals(202, response.getStatusCode().value());
