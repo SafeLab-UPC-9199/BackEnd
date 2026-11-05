@@ -144,10 +144,9 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
             String[] parts = name.split(" - ");
             String labName = parts.length > 1 ? parts[parts.length - 1].trim() : "";
 
-            Optional<Laboratory> labOpt = laboratoryRepository.findByName(labName);
-            lab = labOpt.orElseGet(() ->
-                laboratoryRepository.findAll().stream().findFirst().orElse(null)
-            );
+            // QAS-05: fail closed - never fall back to "some laboratory" (that would
+            // attach foreign tenants' readings to the first lab of another workspace).
+            lab = laboratoryRepository.findByName(labName).orElse(null);
         }
 
         if (lab == null) {

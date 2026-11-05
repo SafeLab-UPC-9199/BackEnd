@@ -53,10 +53,9 @@ public class IncidentCommandServiceImpl implements IncidentCommandService {
 
     @Override
     public Optional<Incident> handle(CreateIncidentCommand command) {
-        if (duplicateIncidentPolicy.hasActiveIncident(command.laboratoryId())) {
-            throw new IllegalStateException("An active incident already exists for laboratory ID " + command.laboratoryId());
-        }
-
+        // QAS-05: the workspace-validated laboratory lookup runs FIRST, so the duplicate
+        // check below cannot be used as an oracle to probe active incidents of other
+        // tenants' laboratories (409 only for labs the caller can actually access).
         var workspaceIdOpt = jwtSecurityContextAdapter.getCurrentWorkspaceId();
         var laboratoryOpt = (workspaceIdOpt.isPresent() && !jwtSecurityContextAdapter.isCurrentUserAdmin())
                 ? laboratoryRepository.findByIdAndWorkspaceId(command.laboratoryId(), workspaceIdOpt.get())
@@ -64,6 +63,10 @@ public class IncidentCommandServiceImpl implements IncidentCommandService {
 
         if (laboratoryOpt.isEmpty()) {
             throw new IllegalArgumentException("Laboratory not found or access denied for ID " + command.laboratoryId());
+        }
+
+        if (duplicateIncidentPolicy.hasActiveIncident(command.laboratoryId())) {
+            throw new IllegalStateException("An active incident already exists for laboratory ID " + command.laboratoryId());
         }
 
         var laboratory = laboratoryOpt.get();

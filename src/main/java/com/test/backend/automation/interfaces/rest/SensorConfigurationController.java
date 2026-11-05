@@ -86,7 +86,14 @@ public class SensorConfigurationController {
 
         EquipmentThreshold equipment = null;
         if (resource.equipmentId() != null) {
-            equipment = equipmentThresholdRepository.findById(resource.equipmentId()).orElse(null);
+            // QAS-05: equipment comes from the request body, so it must belong to the
+            // caller's workspace before being attached to the configuration.
+            equipment = equipmentThresholdRepository
+                    .findByIdAndLaboratoryWorkspaceId(resource.equipmentId(), workspaceIdOpt.get())
+                    .orElse(null);
+            if (equipment == null) {
+                return ResponseEntity.badRequest().build(); // Equipment does not exist in user's workspace
+            }
         }
 
         var command = new CreateSensorConfigurationCommand(
@@ -127,7 +134,13 @@ public class SensorConfigurationController {
 
         EquipmentThreshold equipment = null;
         if (resource.equipmentId() != null) {
-            equipment = equipmentThresholdRepository.findById(resource.equipmentId()).orElse(null);
+            // QAS-05: same rule on update - foreign equipment is rejected, not attached.
+            equipment = equipmentThresholdRepository
+                    .findByIdAndLaboratoryWorkspaceId(resource.equipmentId(), workspaceIdOpt.get())
+                    .orElse(null);
+            if (equipment == null) {
+                return ResponseEntity.badRequest().build(); // Equipment does not exist in user's workspace
+            }
         }
 
         var command = new UpdateSensorConfigurationCommand(

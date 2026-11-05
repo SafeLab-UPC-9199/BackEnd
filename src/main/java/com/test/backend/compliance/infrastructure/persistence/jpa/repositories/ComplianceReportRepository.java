@@ -9,4 +9,7 @@ import java.util.List;
 @Repository
 public interface ComplianceReportRepository extends JpaRepository<ComplianceReport, Long> {
     List<ComplianceReport> findByLaboratoryId(Long laboratoryId);
+
+    /** Workspace-scoped variant (QAS-05): only reports whose laboratory belongs to the workspace. */
+    List<ComplianceReport> findByLaboratoryIdAndLaboratoryWorkspaceId(Long laboratoryId, Long workspaceId);
 }

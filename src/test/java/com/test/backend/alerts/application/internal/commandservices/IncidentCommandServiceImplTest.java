@@ -173,8 +173,11 @@ class IncidentCommandServiceImplTest {
     @Test
     @DisplayName("Throws IllegalStateException when active incident already exists for the laboratory")
     void shouldThrowIllegalStateExceptionWhenDuplicateActiveIncidentExists() {
-        // Arrange
+        // Arrange - workspace-validated lab lookup runs BEFORE the duplicate check (QAS-05)
         var command = new CreateIncidentCommand(1L, "Excursion", "Temp spike", "CRITICAL", 15, "COORDINATOR");
+        when(jwtSecurityContextAdapter.getCurrentWorkspaceId()).thenReturn(Optional.of(10L));
+        when(jwtSecurityContextAdapter.isCurrentUserAdmin()).thenReturn(false);
+        when(laboratoryRepository.findByIdAndWorkspaceId(1L, 10L)).thenReturn(Optional.of(sampleLab));
         when(duplicateIncidentPolicy.hasActiveIncident(1L)).thenReturn(true);
 
         // Act & Assert
@@ -184,11 +187,26 @@ class IncidentCommandServiceImplTest {
     }
 
     @Test
+    @DisplayName("Duplicate oracle: never asks the policy about a laboratory the caller cannot access")
+    void shouldNotQueryDuplicatePolicyForForeignLaboratory() {
+        // Arrange - lab exists but in another workspace; the policy WOULD report an active incident
+        var command = new CreateIncidentCommand(1L, "Excursion", "Temp spike", "CRITICAL", 15, "COORDINATOR");
+        when(jwtSecurityContextAdapter.getCurrentWorkspaceId()).thenReturn(Optional.of(10L));
+        when(jwtSecurityContextAdapter.isCurrentUserAdmin()).thenReturn(false);
+        when(laboratoryRepository.findByIdAndWorkspaceId(1L, 10L)).thenReturn(Optional.empty());
+
+        // Act & Assert - 403-style denial, no 409 leak from another tenant's incident state
+        assertThrows(IllegalArgumentException.class, () -> service.handle(command));
+        verify(duplicateIncidentPolicy, never()).hasActiveIncident(any());
+        verify(incidentRepository, never()).save(any());
+        verify(eventOutboxRepository, never()).save(any());
+    }
+
+    @Test
     @DisplayName("Throws IllegalArgumentException when laboratory does not exist or workspace access is denied")
     void shouldThrowIllegalArgumentExceptionWhenLabNotFoundOrAccessDenied() {
         // Arrange
         var command = new CreateIncidentCommand(999L, "Title", "Desc", "CRITICAL", 15, "COORDINATOR");
-        when(duplicateIncidentPolicy.hasActiveIncident(999L)).thenReturn(false);
         when(jwtSecurityContextAdapter.getCurrentWorkspaceId()).thenReturn(Optional.of(10L));
         when(jwtSecurityContextAdapter.isCurrentUserAdmin()).thenReturn(false);
         when(laboratoryRepository.findByIdAndWorkspaceId(999L, 10L)).thenReturn(Optional.empty());

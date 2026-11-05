@@ -2,10 +2,12 @@ package com.test.backend.automation.interfaces.rest;
 
 import com.test.backend.automation.infrastructure.persistence.jpa.repositories.GeneralSettingRepository;
 import com.test.backend.automation.interfaces.rest.resources.GeneralSettingResource;
+import com.test.backend.shared.application.CurrentWorkspaceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,9 +19,12 @@ import java.util.List;
 public class GeneralSettingController {
 
     private final GeneralSettingRepository generalSettingRepository;
+    private final CurrentWorkspaceService currentWorkspaceService;
 
-    public GeneralSettingController(GeneralSettingRepository generalSettingRepository) {
+    public GeneralSettingController(GeneralSettingRepository generalSettingRepository,
+                                    CurrentWorkspaceService currentWorkspaceService) {
         this.generalSettingRepository = generalSettingRepository;
+        this.currentWorkspaceService = currentWorkspaceService;
     }
 
     @GetMapping
@@ -43,6 +48,10 @@ public class GeneralSettingController {
     @CacheEvict(cacheNames = "generalSettings", allEntries = true)
     @Operation(summary = "Update general setting")
     public ResponseEntity<GeneralSettingResource> updateSetting(@PathVariable Long id, @RequestBody GeneralSettingResource resource) {
+        // QAS-05: global settings are shared by every tenant - mutations are Administrator only.
+        if (!currentWorkspaceService.isCurrentUserAdmin()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         var settingOpt = generalSettingRepository.findById(id);
         if (settingOpt.isEmpty()) {
             return ResponseEntity.notFound().build();
