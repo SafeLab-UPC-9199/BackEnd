@@ -11,6 +11,7 @@ import com.test.backend.labs.domain.model.aggregates.Laboratory;
 import com.test.backend.labs.infrastructure.persistence.jpa.repositories.LaboratoryRepository;
 import com.test.backend.telemetry.domain.model.aggregates.MetricType;
 import com.test.backend.telemetry.domain.model.aggregates.SensorReading;
+import com.test.backend.telemetry.domain.model.events.ReadingRejected;
 import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.MetricTypeRepository;
 import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.SensorReadingRepository;
 import org.junit.jupiter.api.DisplayName;
@@ -20,6 +21,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
@@ -40,6 +42,7 @@ class TelemetryIngestionServiceImplTest {
     @Mock private HistoryRecordRepository historyRecordRepository;
     @Mock private UserWorkspaceAccessRepository userWorkspaceAccessRepository;
     @Mock private EmailService emailService;
+    @Mock private ApplicationEventPublisher applicationEventPublisher;
 
     @InjectMocks
     private TelemetryIngestionServiceImpl service;
@@ -128,5 +131,41 @@ class TelemetryIngestionServiceImplTest {
         // Assert
         verifyNoInteractions(sensorReadingRepository, laboratoryRepository);
         verify(sensorConfigurationRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("ingest publishes ReadingRejected for an unregistered unit (AAA)")
+    void ingest_ShouldPublishReadingRejected_WhenUnitNotRegistered() {
+        // Arrange
+        when(sensorConfigurationRepository.findByUnit("NOPE")).thenReturn(Optional.empty());
+
+        // Act
+        assertThrows(IllegalArgumentException.class,
+                () -> service.ingest("NOPE", "{\"metrics\":{\"temperature\":5.4}}"));
+
+        // Assert
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(applicationEventPublisher).publishEvent(captor.capture());
+        assertInstanceOf(ReadingRejected.class, captor.getValue());
+        var rejected = (ReadingRejected) captor.getValue();
+        assertEquals("NOPE", rejected.unit());
+        assertTrue(rejected.reason().contains("Unregistered"));
+        assertNotNull(rejected.occurredAt());
+    }
+
+    @Test
+    @DisplayName("ingest publishes ReadingRejected when metrics are empty (AAA)")
+    void ingest_ShouldPublishReadingRejected_WhenMetricsEmpty() {
+        // Arrange
+        when(sensorConfigurationRepository.findByUnit("Lab-04")).thenReturn(Optional.of(sensorWithLab()));
+
+        // Act
+        service.ingest("Lab-04", "{\"metrics\":{}}");
+
+        // Assert
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(applicationEventPublisher).publishEvent(captor.capture());
+        assertInstanceOf(ReadingRejected.class, captor.getValue());
+        assertEquals("Missing or empty metrics", ((ReadingRejected) captor.getValue()).reason());
     }
 }

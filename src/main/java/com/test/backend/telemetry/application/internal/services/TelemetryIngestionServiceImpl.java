@@ -19,7 +19,13 @@ import com.test.backend.labs.domain.model.entities.LabMetric;
 import com.test.backend.labs.domain.model.entities.LabMetricSubscription;
 import com.test.backend.labs.domain.model.valueobjets.NotificationPreferences;
 import com.test.backend.labs.infrastructure.persistence.jpa.repositories.LaboratoryRepository;
+import com.test.backend.telemetry.domain.model.aggregates.MetricType;
+import com.test.backend.telemetry.domain.model.aggregates.SensorReading;
+import com.test.backend.telemetry.domain.model.events.ReadingRejected;
 import com.test.backend.telemetry.domain.model.events.TemperatureReadingRecorded;
+import com.test.backend.telemetry.domain.services.TelemetryIngestionService;
+import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.MetricTypeRepository;
+import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.SensorReadingRepository;
 import org.springframework.context.ApplicationEventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -81,9 +87,23 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
         Optional<SensorConfiguration> sensorOpt = sensorConfigurationRepository.findByUnit(unit);
         if (sensorOpt.isEmpty()) {
             logger.warn("Security warning: received telemetry for unregistered sensor unit '{}'", unit);
+            publishRejection(unit, "Unregistered sensor unit");
             throw new IllegalArgumentException("Unregistered sensor unit: " + unit);
         }
         processTelemetryData(sensorOpt.get(), payload);
+    }
+
+    /**
+     * Emits a {@link ReadingRejected} event so rejected frames are observable
+     * (Iteration 1). Never throws: observability must not break ingestion.
+     */
+    private void publishRejection(String unit, String reason) {
+        try {
+            applicationEventPublisher.publishEvent(new ReadingRejected(
+                    unit, reason, LocalDateTime.now(java.time.ZoneOffset.UTC)));
+        } catch (Exception ex) {
+            logger.debug("Failed to publish ReadingRejected event: {}", ex.getMessage());
+        }
     }
 
     private void processTelemetryData(SensorConfiguration sensor, String payload) {
@@ -93,6 +113,7 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
             Map<String, Object> parsed = objectMapper.readValue(payload, Map.class);
             data = parsed;
         } catch (Exception e) {
+            publishRejection(sensor.getUnit(), "Malformed JSON payload");
             throw new IllegalStateException("Invalid telemetry payload: " + e.getMessage(), e);
         }
 
@@ -112,6 +133,7 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
         @SuppressWarnings("unchecked")
         Map<String, Object> metrics = (Map<String, Object>) data.get("metrics");
         if (metrics == null || metrics.isEmpty()) {
+            publishRejection(sensor.getUnit(), "Missing or empty metrics");
             return;
         }
 
@@ -130,6 +152,7 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
 
         if (lab == null) {
             logger.warn("Could not find any Laboratory to associate telemetry for sensor '{}'", sensor.getSensorName());
+            publishRejection(sensor.getUnit(), "No laboratory association");
             return;
         }
 
@@ -146,6 +169,7 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
             Optional<MetricType> metricTypeOpt = metricTypeRepository.findByKey(key);
             if (metricTypeOpt.isEmpty()) {
                 logger.warn("Unknown metric key '{}' from sensor '{}' — ignoring. Register it in metric_types first.", key, sensor.getSensorName());
+                publishRejection(sensor.getUnit(), "Unknown metric key: " + key);
                 continue;
             }
             MetricType metricType = metricTypeOpt.get();
@@ -159,14 +183,22 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
             reading.setRecordedAt(recordedAt);
             sensorReadingRepository.save(reading);
 
+            // Resolve threshold context once: shared by the domain event below
+            // and by the alert evaluation performed in updateRealTimeLabMetric.
+            ThresholdContext thresholds = resolveThresholds(lab, metricType, sensor);
+
             // Publish domain event for decoupling (Iteration 1)
             try {
                 applicationEventPublisher.publishEvent(new TemperatureReadingRecorded(
                         reading.getId(),
                         lab.getId(),
                         metricType.getId(),
+                        metricType.getKey(),
                         val,
-                        recordedAt
+                        recordedAt,
+                        thresholds.min(),
+                        thresholds.max(),
+                        lab.getName()
                 ));
             } catch (Exception ex) {
                 logger.debug("Failed to publish TemperatureReadingRecorded event: {}", ex.getMessage());
@@ -213,16 +245,17 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
     }
 
     /**
-     * Evaluates thresholds using the LabMetricSubscription relationship.
-     * No more contains()-based string matching — uses exact MetricType reference.
+     * Threshold context resolved from the sensor's equipment, its own limits or
+     * the laboratory metric subscription, in that priority order.
      */
-    private void evaluateThresholds(Laboratory lab, MetricType metricType, Double val, LabMetric metric, SensorConfiguration sensor) {
+    private record ThresholdContext(Double min, Double max, Double warning, String targetName) {}
+
+    private ThresholdContext resolveThresholds(Laboratory lab, MetricType metricType, SensorConfiguration sensor) {
         Double minThreshold = null;
         Double maxThreshold = null;
         Double warningThreshold = null;
         String targetName = "";
 
-        // Resolve thresholds
         EquipmentThreshold equip = sensor.getEquipment();
         if (equip != null) {
             minThreshold = equip.getMinThreshold();
@@ -245,6 +278,20 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
                 targetName = "laboratory ambient";
             }
         }
+
+        return new ThresholdContext(minThreshold, maxThreshold, warningThreshold, targetName);
+    }
+
+    /**
+     * Evaluates thresholds using the LabMetricSubscription relationship.
+     * No more contains()-based string matching — uses exact MetricType reference.
+     */
+    private void evaluateThresholds(Laboratory lab, MetricType metricType, Double val, LabMetric metric, SensorConfiguration sensor) {
+        ThresholdContext thresholds = resolveThresholds(lab, metricType, sensor);
+        Double minThreshold = thresholds.min();
+        Double maxThreshold = thresholds.max();
+        Double warningThreshold = thresholds.warning();
+        String targetName = thresholds.targetName();
 
         if (minThreshold == null && maxThreshold == null) {
             metric.setStatus("NORMAL");

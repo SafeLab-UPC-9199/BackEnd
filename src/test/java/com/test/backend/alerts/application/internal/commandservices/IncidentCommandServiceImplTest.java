@@ -5,9 +5,7 @@ import com.test.backend.alerts.domain.model.commands.AcknowledgeIncidentCommand;
 import com.test.backend.alerts.domain.model.commands.ApplyEscalationCommand;
 import com.test.backend.alerts.domain.model.commands.CreateIncidentCommand;
 import com.test.backend.alerts.domain.model.commands.ResolveIncidentCommand;
-import com.test.backend.alerts.domain.model.entities.EventOutbox;
 import com.test.backend.alerts.domain.services.DuplicateIncidentPolicy;
-import com.test.backend.alerts.infrastructure.persistence.jpa.repositories.EventOutboxRepository;
 import com.test.backend.alerts.infrastructure.persistence.jpa.repositories.IncidentRepository;
 import com.test.backend.alerts.infrastructure.security.JWTSecurityContextAdapter;
 import com.test.backend.compliance.domain.model.aggregates.AuditTrail;
@@ -15,6 +13,8 @@ import com.test.backend.compliance.infrastructure.persistence.jpa.repositories.A
 import com.test.backend.labs.domain.model.aggregates.Laboratory;
 import com.test.backend.labs.domain.model.aggregates.Workspace;
 import com.test.backend.labs.infrastructure.persistence.jpa.repositories.LaboratoryRepository;
+import com.test.backend.shared.domain.model.entities.SharedEventOutbox;
+import com.test.backend.shared.infrastructure.persistence.jpa.repositories.SharedEventOutboxRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -40,7 +40,7 @@ class IncidentCommandServiceImplTest {
     private LaboratoryRepository laboratoryRepository;
 
     @Mock
-    private EventOutboxRepository eventOutboxRepository;
+    private SharedEventOutboxRepository eventOutboxRepository;
 
     @Mock
     private AuditTrailRepository auditTrailRepository;
@@ -96,7 +96,7 @@ class IncidentCommandServiceImplTest {
                 "INCIDENT_CREATED".equals(outbox.getEventType())
                         && outbox.getCorrelationId() != null
                         && !outbox.getCorrelationId().isBlank()
-                        && EventOutbox.DEFAULT_SCHEMA_VERSION.equals(outbox.getSchemaVersion())));
+                        && SharedEventOutbox.DEFAULT_SCHEMA_VERSION.equals(outbox.getSchemaVersion())));
         verify(auditTrailRepository).save(argThat(audit -> "CREATE_INCIDENT".equals(audit.getAction()) && audit.getSignature() != null));
     }
 
