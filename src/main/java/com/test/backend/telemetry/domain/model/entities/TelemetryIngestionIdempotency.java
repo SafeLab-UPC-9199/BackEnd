@@ -19,10 +19,6 @@ import java.time.LocalDateTime;
 })
 public class TelemetryIngestionIdempotency extends AuditableModel {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
     @Column(name = "idempotency_key", nullable = false, length = 128)
     private String idempotencyKey;
 

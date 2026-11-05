@@ -24,10 +24,6 @@ public class SharedEventOutbox extends AuditableModel {
      */
     public static final String DEFAULT_SCHEMA_VERSION = "1.0";
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
-
     @Column(name = "event_id", nullable = false, unique = true, length = 64)
     private String eventId;
 
