@@ -16,7 +16,7 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "compliance_reports")
+@Table(name = "compliance_reports", catalog = "safelab_compliance")
 public class ComplianceReport extends AuditableAbstractAggregateRoot<ComplianceReport> {
 
     @ManyToOne
@@ -43,6 +43,7 @@ public class ComplianceReport extends AuditableAbstractAggregateRoot<ComplianceR
 
     @ManyToMany
     @JoinTable(
+            catalog = "safelab_compliance",
             name = "report_audit_links",
             joinColumns = @JoinColumn(name = "report_id"),
             inverseJoinColumns = @JoinColumn(name = "audit_id")

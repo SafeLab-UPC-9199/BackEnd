@@ -19,7 +19,7 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "alerts")
+@Table(name = "alerts", catalog = "safelab_alerts")
 public class Alert extends AuditableAbstractAggregateRoot<Alert> {
     @ManyToOne
     @JoinColumn(name = "laboratory_id", nullable = true)

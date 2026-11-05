@@ -17,7 +17,7 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "sensor_configurations")
+@Table(name = "sensor_configurations", catalog = "safelab_automation")
 public class SensorConfiguration extends AuditableAbstractAggregateRoot<SensorConfiguration> {
 
     @Column(name = "sensor_name", nullable = false)

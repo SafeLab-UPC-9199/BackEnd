@@ -15,7 +15,7 @@ import java.time.LocalDateTime;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "corrective_actions")
+@Table(name = "corrective_actions", catalog = "safelab_alerts")
 public class CorrectiveAction extends AuditableModel {
 
     @OneToOne

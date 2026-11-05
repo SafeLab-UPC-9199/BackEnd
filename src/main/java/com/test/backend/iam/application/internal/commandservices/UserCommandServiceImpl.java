@@ -170,7 +170,7 @@ public class UserCommandServiceImpl implements UserCommandService {
     private Long getMaxSeededId(String settingKey) {
         try {
             Object val = entityManager.createNativeQuery(
-                "SELECT value FROM general_settings WHERE setting_key = ?1"
+                "SELECT value FROM safelab_automation.general_settings WHERE setting_key = ?1"
             ).setParameter(1, settingKey).getSingleResult();
             if (val != null) {
                 return Long.parseLong(val.toString());
@@ -189,7 +189,7 @@ public class UserCommandServiceImpl implements UserCommandService {
         Long maxSeededUserId = getMaxSeededId("max_seeded_user_id");
         if (maxSeededUserId == 0L) {
             try {
-                Object adminId = entityManager.createNativeQuery("SELECT id FROM users WHERE email = ?1").setParameter(1, adminEmail).getSingleResult();
+                Object adminId = entityManager.createNativeQuery("SELECT id FROM safelab_iam.users WHERE email = ?1").setParameter(1, adminEmail).getSingleResult();
                 if (adminId != null) maxSeededUserId = Long.parseLong(adminId.toString());
             } catch (Exception e) {}
         }
@@ -197,7 +197,7 @@ public class UserCommandServiceImpl implements UserCommandService {
         Long maxSeededProfileId = getMaxSeededId("max_seeded_profile_id");
         if (maxSeededProfileId == 0L) {
             try {
-                Object pId = entityManager.createNativeQuery("SELECT id FROM user_profiles WHERE email = ?1").setParameter(1, adminEmail).getSingleResult();
+                Object pId = entityManager.createNativeQuery("SELECT id FROM safelab_automation.user_profiles WHERE email = ?1").setParameter(1, adminEmail).getSingleResult();
                 if (pId != null) maxSeededProfileId = Long.parseLong(pId.toString());
             } catch (Exception e) {}
         }
@@ -205,7 +205,7 @@ public class UserCommandServiceImpl implements UserCommandService {
         Long maxSeededLabId = getMaxSeededId("max_seeded_laboratory_id");
         if (maxSeededLabId == 0L) {
             try {
-                Object maxLabId = entityManager.createNativeQuery("SELECT MAX(id) FROM laboratories WHERE lab_code IN ('LAB-BSL4-01','LAB-CHEM-02','LAB-CRYO-03','LAB-ANAL-04','LAB-MOLB-05','LAB-CLEAN-06','LAB-RAD-07','LAB-PHARM-08','LAB-GENE-09','LAB-MICRO-10')").getSingleResult();
+                Object maxLabId = entityManager.createNativeQuery("SELECT MAX(id) FROM safelab_labs.laboratories WHERE lab_code IN ('LAB-BSL4-01','LAB-CHEM-02','LAB-CRYO-03','LAB-ANAL-04','LAB-MOLB-05','LAB-CLEAN-06','LAB-RAD-07','LAB-PHARM-08','LAB-GENE-09','LAB-MICRO-10')").getSingleResult();
                 if (maxLabId != null) maxSeededLabId = Long.parseLong(maxLabId.toString());
             } catch (Exception e) {}
         }
@@ -231,67 +231,67 @@ public class UserCommandServiceImpl implements UserCommandService {
         // Native deletions in exact dependency order:
 
         // 1. calibration_records
-        entityManager.createNativeQuery("DELETE FROM calibration_records WHERE id > ?1").setParameter(1, maxSeededCalibrationId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_automation.calibration_records WHERE id > ?1").setParameter(1, maxSeededCalibrationId).executeUpdate();
 
         // 2. sensor_readings
-        entityManager.createNativeQuery("DELETE FROM sensor_readings WHERE id > ?1").setParameter(1, maxSeededReadingId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_telemetry.sensor_readings WHERE id > ?1").setParameter(1, maxSeededReadingId).executeUpdate();
 
         // 3. alert_metrics
-        entityManager.createNativeQuery("DELETE FROM alert_metrics WHERE id > ?1").setParameter(1, maxSeededAlertMetricId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_alerts.alert_metrics WHERE id > ?1").setParameter(1, maxSeededAlertMetricId).executeUpdate();
 
         // 4. alerts
-        entityManager.createNativeQuery("DELETE FROM alerts WHERE id > ?1").setParameter(1, maxSeededAlertId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_alerts.alerts WHERE id > ?1").setParameter(1, maxSeededAlertId).executeUpdate();
 
         // 5. mitigation_systems
-        entityManager.createNativeQuery("DELETE FROM mitigation_systems WHERE id > ?1").setParameter(1, maxSeededMitigationSystemId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_labs.mitigation_systems WHERE id > ?1").setParameter(1, maxSeededMitigationSystemId).executeUpdate();
 
         // 6. storage_units
-        entityManager.createNativeQuery("DELETE FROM storage_units WHERE id > ?1").setParameter(1, maxSeededStorageUnitId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_labs.storage_units WHERE id > ?1").setParameter(1, maxSeededStorageUnitId).executeUpdate();
 
         // 7. lab_metric_subscriptions
-        entityManager.createNativeQuery("DELETE FROM lab_metric_subscriptions WHERE id > ?1").setParameter(1, maxSeededMetricSubId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_labs.lab_metric_subscriptions WHERE id > ?1").setParameter(1, maxSeededMetricSubId).executeUpdate();
 
         // 8. lab_metrics
-        entityManager.createNativeQuery("DELETE FROM lab_metrics WHERE id > ?1").setParameter(1, maxSeededMetricId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_labs.lab_metrics WHERE id > ?1").setParameter(1, maxSeededMetricId).executeUpdate();
 
         // 9. lab_activities
-        entityManager.createNativeQuery("DELETE FROM lab_activities WHERE id > ?1").setParameter(1, maxSeededActivityId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_labs.lab_activities WHERE id > ?1").setParameter(1, maxSeededActivityId).executeUpdate();
 
         // 10. lab_schedules
-        entityManager.createNativeQuery("DELETE FROM lab_schedules WHERE id > ?1").setParameter(1, maxSeededScheduleId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_labs.lab_schedules WHERE id > ?1").setParameter(1, maxSeededScheduleId).executeUpdate();
 
         // 11. history_records
-        entityManager.createNativeQuery("DELETE FROM history_records WHERE id > ?1").setParameter(1, maxSeededHistoryId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_history.history_records WHERE id > ?1").setParameter(1, maxSeededHistoryId).executeUpdate();
 
         // 12. sensor_configurations
-        entityManager.createNativeQuery("DELETE FROM sensor_configurations WHERE id > ?1").setParameter(1, maxSeededSensorId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_automation.sensor_configurations WHERE id > ?1").setParameter(1, maxSeededSensorId).executeUpdate();
 
         // 13. equipment_thresholds
-        entityManager.createNativeQuery("DELETE FROM equipment_thresholds WHERE id > ?1").setParameter(1, maxSeededEquipmentThresholdId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_automation.equipment_thresholds WHERE id > ?1").setParameter(1, maxSeededEquipmentThresholdId).executeUpdate();
 
         // 14. lab_user_accesses
-        entityManager.createNativeQuery("DELETE FROM lab_user_accesses WHERE id > ?1").setParameter(1, maxSeededLabAccessId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_automation.lab_user_accesses WHERE id > ?1").setParameter(1, maxSeededLabAccessId).executeUpdate();
 
         // 15. user_workspace_accesses
-        entityManager.createNativeQuery("DELETE FROM user_workspace_accesses WHERE id > ?1").setParameter(1, maxSeededWorkspaceAccessId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_automation.user_workspace_accesses WHERE id > ?1").setParameter(1, maxSeededWorkspaceAccessId).executeUpdate();
 
         // 16. notification_preferences
-        entityManager.createNativeQuery("DELETE FROM notification_preferences WHERE id > ?1").setParameter(1, maxSeededNotificationPrefId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_automation.notification_preferences WHERE id > ?1").setParameter(1, maxSeededNotificationPrefId).executeUpdate();
 
         // 17. user_profiles
-        entityManager.createNativeQuery("DELETE FROM user_profiles WHERE id > ?1").setParameter(1, maxSeededProfileId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_automation.user_profiles WHERE id > ?1").setParameter(1, maxSeededProfileId).executeUpdate();
 
         // 18. user_iam_roles
-        entityManager.createNativeQuery("DELETE FROM user_iam_roles WHERE user_id > ?1").setParameter(1, maxSeededUserId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_iam.user_iam_roles WHERE user_id > ?1").setParameter(1, maxSeededUserId).executeUpdate();
 
         // 19. users
-        entityManager.createNativeQuery("DELETE FROM users WHERE id > ?1").setParameter(1, maxSeededUserId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_iam.users WHERE id > ?1").setParameter(1, maxSeededUserId).executeUpdate();
 
         // 20. laboratories
-        entityManager.createNativeQuery("DELETE FROM laboratories WHERE id > ?1").setParameter(1, maxSeededLabId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_labs.laboratories WHERE id > ?1").setParameter(1, maxSeededLabId).executeUpdate();
 
         // 21. workspaces
-        entityManager.createNativeQuery("DELETE FROM workspaces WHERE id > ?1").setParameter(1, maxSeededWorkspaceId).executeUpdate();
+        entityManager.createNativeQuery("DELETE FROM safelab_labs.workspaces WHERE id > ?1").setParameter(1, maxSeededWorkspaceId).executeUpdate();
 
         logger.info("Successfully performed pristine database reset. Seeded data is preserved.");
     }

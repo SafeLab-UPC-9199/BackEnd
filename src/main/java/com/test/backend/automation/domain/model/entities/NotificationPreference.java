@@ -13,7 +13,7 @@ import lombok.AllArgsConstructor;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "notification_preferences")
+@Table(name = "notification_preferences", catalog = "safelab_automation")
 public class NotificationPreference extends AuditableModel {
 
     @ManyToOne

@@ -15,7 +15,7 @@ import java.time.format.DateTimeFormatter;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "sensor_readings")
+@Table(name = "sensor_readings", catalog = "safelab_telemetry")
 public class SensorReading extends AuditableAbstractAggregateRoot<SensorReading> {
 
     @ManyToOne

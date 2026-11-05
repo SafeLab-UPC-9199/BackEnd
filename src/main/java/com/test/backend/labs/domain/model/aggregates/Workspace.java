@@ -13,7 +13,7 @@ import java.util.UUID;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "workspaces")
+@Table(name = "workspaces", catalog = "safelab_labs")
 public class Workspace extends AuditableAbstractAggregateRoot<Workspace> {
 
     @Column(nullable = false)

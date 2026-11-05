@@ -16,7 +16,7 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "automation_rules")
+@Table(name = "automation_rules", catalog = "safelab_automation")
 public class AutomationRule extends AuditableAbstractAggregateRoot<AutomationRule> {
 
     @Column(nullable = false)

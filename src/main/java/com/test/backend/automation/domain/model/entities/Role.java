@@ -15,7 +15,7 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "roles")
+@Table(name = "roles", catalog = "safelab_automation")
 public class Role extends AuditableModel {
 
     @Column(unique = true, nullable = false)

@@ -15,7 +15,7 @@ import lombok.AllArgsConstructor;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "calibration_records")
+@Table(name = "calibration_records", catalog = "safelab_automation")
 public class CalibrationRecord extends AuditableModel {
 
     @ManyToOne

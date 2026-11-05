@@ -28,6 +28,9 @@
 	</scm>
 	<properties>
 		<java.version>24</java.version>
+		<!-- Tests tagged 'it' (integration, need Docker/Testcontainers) are excluded
+		     from the default build. Run them with: mvn test -Dtest.excluded.groups= -->
+		<test.excluded.groups>it</test.excluded.groups>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -92,6 +95,12 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
+		<!-- Cache abstraction: required by @EnableCaching/@Cacheable (Boot 4 auto-config
+		     only kicks in with this starter; without it the context fails to start) -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-cache</artifactId>
+		</dependency>
 		<dependency>
 			<groupId>io.github.resilience4j</groupId>
 			<artifactId>resilience4j-spring-boot3</artifactId>
@@ -131,6 +140,17 @@
 			<artifactId>resend-java</artifactId>
 			<version>4.13.0</version>
 		</dependency>
+		<!-- Testcontainers for integration tests (@Tag("it")) — TC 2.x artifact names -->
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-mysql</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-junit-jupiter</artifactId>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
 
 	<build>
@@ -145,6 +165,13 @@
 							<artifactId>lombok</artifactId>
 						</exclude>
 					</excludes>
+				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<excludedGroups>${test.excluded.groups}</excludedGroups>
 				</configuration>
 			</plugin>
 			<plugin>

@@ -13,7 +13,7 @@ import lombok.AllArgsConstructor;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "storage_units")
+@Table(name = "storage_units", catalog = "safelab_labs")
 public class StorageUnit extends AuditableAbstractAggregateRoot<StorageUnit> {
 
     @ManyToOne

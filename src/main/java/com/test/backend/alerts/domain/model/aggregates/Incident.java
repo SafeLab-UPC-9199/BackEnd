@@ -16,7 +16,7 @@ import java.time.LocalDateTime;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "incidents")
+@Table(name = "incidents", catalog = "safelab_alerts")
 public class Incident extends AuditableAbstractAggregateRoot<Incident> {
 
     @ManyToOne

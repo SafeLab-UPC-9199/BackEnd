@@ -17,7 +17,7 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "laboratories")
+@Table(name = "laboratories", catalog = "safelab_labs")
 public class Laboratory extends AuditableAbstractAggregateRoot<Laboratory> {
 
     @Column(nullable = false)
