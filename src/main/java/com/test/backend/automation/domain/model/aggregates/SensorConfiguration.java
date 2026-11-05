@@ -56,6 +56,16 @@ public class SensorConfiguration extends AuditableAbstractAggregateRoot<SensorCo
     @Column(name = "warning_threshold")
     private Double warningThreshold;
 
+    /**
+     * Per-device HMAC secret (ADD Iteration: firma por dispositivo). When set, the HTTP
+     * ingestion endpoint requires {@code X-Signature = hex(HMAC-SHA256(rawBody, deviceSecret))}
+     * for frames carrying this unit - the shared deployment secret no longer satisfies it.
+     * Never exposed through REST resources; provisioned only via
+     * {@code POST /api/v1/sensor-configurations/{id}/device-secret} (Administrator).
+     */
+    @Column(name = "device_secret", length = 128)
+    private String deviceSecret;
+
     @OneToMany(mappedBy = "sensorConfiguration", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<CalibrationRecord> calibrationRecords = new ArrayList<>();
 

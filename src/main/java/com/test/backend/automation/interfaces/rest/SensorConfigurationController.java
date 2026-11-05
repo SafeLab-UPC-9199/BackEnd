@@ -18,7 +18,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.security.SecureRandom;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 @Tag(name = "Sensor Configurations", description = "Sensor Configurations management API")
 @RestController
@@ -181,6 +185,65 @@ public class SensorConfigurationController {
         config.calibrate(command);
         sensorConfigurationRepository.save(config);
         return ResponseEntity.ok(toResource(config));
+    }
+
+    /**
+     * Fase firma por dispositivo: provisions a fresh per-device HMAC secret for the sensor.
+     * Administrator-only (credential management), returned exactly once so the operator can
+     * load it onto the edge device; it is never readable through the regular resources.
+     */
+    @PostMapping("/{id}/device-secret")
+    @Operation(summary = "Provision (or rotate) the per-device HMAC secret used to sign HTTP ingestion frames")
+    public ResponseEntity<Map<String, String>> provisionDeviceSecret(@PathVariable Long id) {
+        if (!currentWorkspaceService.isCurrentUserAdmin()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                    "status", "ERROR",
+                    "message", "Only administrators can manage device credentials."
+            ));
+        }
+        var configOpt = sensorConfigurationRepository.findById(id);
+        if (configOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        var config = configOpt.get();
+        String secret = generateDeviceSecret();
+        config.setDeviceSecret(secret);
+        sensorConfigurationRepository.save(config);
+        return ResponseEntity.ok(Map.of(
+                "sensorId", String.valueOf(config.getId()),
+                "unit", config.getUnit() != null ? config.getUnit() : "",
+                "deviceSecret", secret
+        ));
+    }
+
+    /**
+     * Removes the per-device secret so the sensor falls back to the shared deployment
+     * signature (or none, when no secret is configured). Administrator-only.
+     */
+    @DeleteMapping("/{id}/device-secret")
+    @Operation(summary = "Revoke the per-device HMAC secret (falls back to the shared secret)")
+    public ResponseEntity<Map<String, String>> revokeDeviceSecret(@PathVariable Long id) {
+        if (!currentWorkspaceService.isCurrentUserAdmin()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                    "status", "ERROR",
+                    "message", "Only administrators can manage device credentials."
+            ));
+        }
+        var configOpt = sensorConfigurationRepository.findById(id);
+        if (configOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        var config = configOpt.get();
+        config.setDeviceSecret(null);
+        sensorConfigurationRepository.save(config);
+        return ResponseEntity.ok(Map.of("status", "REVOKED", "sensorId", String.valueOf(config.getId())));
+    }
+
+    /** 32 random bytes rendered as hex - 256 bits of entropy for HmacSHA256. */
+    private String generateDeviceSecret() {
+        byte[] raw = new byte[32];
+        new SecureRandom().nextBytes(raw);
+        return HexFormat.of().formatHex(raw);
     }
 
     private SensorConfigurationResource toResource(SensorConfiguration config) {

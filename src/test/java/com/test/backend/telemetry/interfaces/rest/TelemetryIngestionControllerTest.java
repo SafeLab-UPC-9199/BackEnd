@@ -1,5 +1,7 @@
 package com.test.backend.telemetry.interfaces.rest;
 
+import com.test.backend.automation.domain.model.aggregates.SensorConfiguration;
+import com.test.backend.automation.infrastructure.persistence.jpa.repositories.SensorConfigurationRepository;
 import com.test.backend.telemetry.domain.services.TelemetryIngestionService;
 import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.TelemetryIngestionIdempotencyRepository;
 import org.junit.jupiter.api.DisplayName;
@@ -28,6 +30,7 @@ class TelemetryIngestionControllerTest {
 
     private static final String API_KEY = "test-ingestion-key";
     private static final String HMAC_SECRET = "unit-test-hmac-secret";
+    private static final String DEVICE_SECRET = "per-device-hmac-secret";
 
     @Mock
     private TelemetryIngestionService telemetryIngestionService;
@@ -35,9 +38,12 @@ class TelemetryIngestionControllerTest {
     @Mock
     private TelemetryIngestionIdempotencyRepository idempotencyRepository;
 
+    @Mock
+    private SensorConfigurationRepository sensorConfigurationRepository;
+
     private TelemetryIngestionController controllerWith(String key, String hmacSecret) {
         return new TelemetryIngestionController(telemetryIngestionService, key, hmacSecret,
-                idempotencyRepository, 60L);
+                idempotencyRepository, sensorConfigurationRepository, 60L);
     }
 
     private TelemetryIngestionController controllerWithKey(String key) {
@@ -244,5 +250,60 @@ class TelemetryIngestionControllerTest {
                         && idem.getRequestHash() != null
                         && idem.getExpiresAt() != null
                         && idem.getExpiresAt().isAfter(LocalDateTime.now())));
+    }
+
+    private SensorConfiguration sensorWithDeviceSecret() {
+        var sensor = new SensorConfiguration();
+        sensor.setUnit("Lab-04");
+        sensor.setDeviceSecret(DEVICE_SECRET);
+        return sensor;
+    }
+
+    @Test
+    @DisplayName("per-device signature: frame signed with the device's own key is accepted (AAA)")
+    void ingest_ShouldAcceptSignatureOfTheDevicesOwnKey() {
+        // Arrange - sensor carries its own key; the shared secret does not apply to it
+        var c = controllerWith(API_KEY, HMAC_SECRET);
+        when(sensorConfigurationRepository.findByUnit("Lab-04")).thenReturn(Optional.of(sensorWithDeviceSecret()));
+        var signature = sign(DEVICE_SECRET, validBody());
+
+        // Act
+        var response = c.ingest(API_KEY, null, signature, validBody());
+
+        // Assert
+        assertEquals(202, response.getStatusCode().value());
+        verify(telemetryIngestionService).ingest(eq("Lab-04"), any());
+    }
+
+    @Test
+    @DisplayName("per-device signature: the shared deployment secret does NOT satisfy a device that has its own key (AAA)")
+    void ingest_ShouldRejectSharedSecretForDeviceWithOwnKey() {
+        // Arrange - attacker replaying frames with the leaked shared secret
+        var c = controllerWith(API_KEY, HMAC_SECRET);
+        when(sensorConfigurationRepository.findByUnit("Lab-04")).thenReturn(Optional.of(sensorWithDeviceSecret()));
+        var sharedSecretSignature = sign(HMAC_SECRET, validBody());
+
+        // Act
+        var response = c.ingest(API_KEY, null, sharedSecretSignature, validBody());
+
+        // Assert - fail-closed on the device's own key
+        assertEquals(401, response.getStatusCode().value());
+        assertTrue(response.getBody().get("message").contains("own key"));
+        verifyNoInteractions(telemetryIngestionService);
+    }
+
+    @Test
+    @DisplayName("per-device signature is enforced even when no shared secret is configured (AAA)")
+    void ingest_ShouldEnforceDeviceSignatureWithoutSharedSecret() {
+        // Arrange - device secret alone requires the signature
+        var c = controllerWithKey(API_KEY);
+        when(sensorConfigurationRepository.findByUnit("Lab-04")).thenReturn(Optional.of(sensorWithDeviceSecret()));
+
+        // Act
+        var response = c.ingest(API_KEY, null, null, validBody());
+
+        // Assert
+        assertEquals(401, response.getStatusCode().value());
+        verifyNoInteractions(telemetryIngestionService);
     }
 }
