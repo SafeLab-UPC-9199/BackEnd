@@ -29,7 +29,7 @@ public class ResendClient {
 
     public ResendClient(@Value("${resend.api-key}") String apiKey) {
         if (apiKey == null || apiKey.trim().isEmpty()) {
-            logger.error("RESEND CONFIG ERROR: API Key is null or empty!");
+            logger.warn("Resend API key is not configured. Outbound email delivery will be disabled.");
         } else {
             logger.info("Resend API Key loaded successfully. Value: {}...", apiKey.substring(0, Math.min(apiKey.length(), 10)));
         }
