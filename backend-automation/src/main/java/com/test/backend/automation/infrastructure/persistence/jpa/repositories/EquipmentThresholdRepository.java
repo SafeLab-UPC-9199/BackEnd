@@ -9,6 +9,4 @@ import java.util.List;
 @Repository
 public interface EquipmentThresholdRepository extends JpaRepository<EquipmentThreshold, Long> {
     List<EquipmentThreshold> findByLaboratoryId(Long laboratoryId);
-    List<EquipmentThreshold> findByLaboratoryWorkspaceId(Long workspaceId);
-    java.util.Optional<EquipmentThreshold> findByIdAndLaboratoryWorkspaceId(Long id, Long workspaceId);
 }

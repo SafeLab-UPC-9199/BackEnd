@@ -67,8 +67,10 @@ public class UserProfile extends AuditableAbstractAggregateRoot<UserProfile> {
     @OneToMany(mappedBy = "userProfile", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<NotificationPreference> notificationPreferences = new ArrayList<>();
 
-    @OneToMany(mappedBy = "userProfile", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<LabUserAccess> labAccesses = new ArrayList<>();
+    // labAccesses collection removed: LabUserAccess was denormalized to a plain
+    // userProfileId (no back-reference), so mappedBy="userProfile" made Hibernate
+    // fail at startup ("property 'userProfile' does not exist"). LabUserAccess
+    // rows are managed through their own repository.
 
     public UserProfile updateFrom(com.test.backend.automation.domain.model.commands.UpdateUserProfileCommand command, Role role) {
         this.fullName = command.fullName();

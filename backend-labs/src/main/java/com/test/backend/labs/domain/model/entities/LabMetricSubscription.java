@@ -17,8 +17,9 @@ import lombok.AllArgsConstructor;
        uniqueConstraints = @UniqueConstraint(columnNames = {"laboratory_id", "metric_type_id"}))
 public class LabMetricSubscription extends AuditableModel {
 
-    @Column(name = "laboratory_id", nullable = false)
-    private Long laboratoryId;
+    // laboratory_id FK is now owned by Laboratory.metricSubscriptions
+    // (@OneToMany @JoinColumn); keeping a @Column here would map the same
+    // column twice ("Repeated column").
 
     @Column(name = "metric_type_id", nullable = false)
     private Long metricTypeId;

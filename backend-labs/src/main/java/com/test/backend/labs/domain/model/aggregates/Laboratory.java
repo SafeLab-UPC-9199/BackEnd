@@ -63,7 +63,11 @@ public class Laboratory extends AuditableAbstractAggregateRoot<Laboratory> {
     @Embedded
     private NotificationPreferences notificationPreferences;
 
-    @OneToMany(mappedBy = "laboratory", cascade = CascadeType.ALL, orphanRemoval = true)
+    // Unidirectional join column: LabMetricSubscription was denormalized to a
+    // plain laboratoryId (no back-reference), so mappedBy="laboratory" failed at
+    // startup. The collection now owns the laboratory_id FK.
+    @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true)
+    @JoinColumn(name = "laboratory_id")
     private List<LabMetricSubscription> metricSubscriptions = new ArrayList<>();
 
     @OneToMany(mappedBy = "laboratory", cascade = CascadeType.ALL, orphanRemoval = true)

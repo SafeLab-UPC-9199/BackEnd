@@ -21,6 +21,12 @@ public class Incident extends AuditableAbstractAggregateRoot<Incident> {
     @Column(name = "laboratory_id", nullable = false)
     private Long laboratoryId;
 
+    // Denormalized workspace of the laboratory (flat column): the alerts catalog
+    // has no Laboratory entity anymore, so QAS-05 tenant queries
+    // (findByLaboratoryWorkspaceId...) filter against this column.
+    @Column(name = "laboratory_workspace_id")
+    private Long laboratoryWorkspaceId;
+
     @Column(name = "title")
     private String title;
 

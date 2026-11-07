@@ -11,5 +11,5 @@ import java.util.Optional;
 public interface SensorConfigurationClient {
 
     @GetMapping("/api/v1/automation/sensor-configurations/unit/{unit}")
-    Optional<SensorConfigurationDTO> findByUnit(@PathVariable String unit);
+    Optional<SensorConfigurationDTO> findByUnit(@PathVariable("unit") String unit);
 }

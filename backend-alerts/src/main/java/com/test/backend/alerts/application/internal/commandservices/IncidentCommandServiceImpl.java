@@ -52,6 +52,10 @@ public class IncidentCommandServiceImpl implements IncidentCommandService {
                 command.escalationMaxMins(),
                 command.escalationNextRole()
         );
+        // QAS-05: denormalize the caller's workspace so tenant-scoped queries
+        // (IncidentQueryServiceImpl) can filter without a Laboratory relation.
+        jwtSecurityContextAdapter.getCurrentWorkspaceId()
+                .ifPresent(incident::setLaboratoryWorkspaceId);
 
         var savedIncident = incidentRepository.save(incident);
 

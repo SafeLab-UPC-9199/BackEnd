@@ -12,5 +12,8 @@ public interface UserWorkspaceAccessRepository extends JpaRepository<UserWorkspa
     List<UserWorkspaceAccess> findByUserProfileId(Long userProfileId);
     List<UserWorkspaceAccess> findByWorkspaceId(Long workspaceId);
     Optional<UserWorkspaceAccess> findByUserProfileIdAndWorkspaceId(Long userProfileId, Long workspaceId);
-    Optional<UserWorkspaceAccess> findByUserProfileEmailAndWorkspaceId(String email, Long workspaceId);
+    // findByUserProfileEmailAndWorkspaceId removed: UserWorkspaceAccess was
+    // denormalized to a plain userProfileId, so Spring Data could not resolve
+    // the nested "userProfileEmail" property ("No property 'userProfileEmail'
+    // found"). Callers resolve the profile id first (as the module code does).
 }

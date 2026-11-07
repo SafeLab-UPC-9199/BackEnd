@@ -33,7 +33,9 @@
 		<paho-mqtt.version>1.2.5</paho-mqtt.version>
 		<resend-java.version>4.13.0</resend-java.version>
 		<pluralize.version>1.0.0</pluralize.version>
-		<spring-cloud.version>2024.0.0</spring-cloud.version>
+		<!-- 2025.1.x = train for Spring Boot 4.x (2024.0.0 targets Boot 3.4 and
+		     crashes at startup: ClassNotFoundException ServerProperties) -->
+		<spring-cloud.version>2025.1.4</spring-cloud.version>
 	</properties>
 	<dependencyManagement>
 		<dependencies>
@@ -188,6 +190,13 @@
 					<configuration>
 						<source>${java.version}</source>
 						<target>${java.version}</target>
+						<!-- The monolith inherits -parameters from
+						     spring-boot-starter-parent, but these modules do not:
+						     without it Spring MVC cannot resolve the name of
+						     @PathVariable/@RequestParam arguments without an
+						     explicit name -> IllegalArgumentException at runtime
+						     ("Ensure that the compiler uses the '-parameters' flag"). -->
+						<parameters>true</parameters>
 					</configuration>
 				</plugin>
 			</plugins>

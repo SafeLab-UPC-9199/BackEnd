@@ -8,8 +8,8 @@ import java.util.List;
 
 @Repository
 public interface ComplianceReportRepository extends JpaRepository<ComplianceReport, Long> {
+    // Workspace-scoped variant (QAS-05 findByLaboratoryIdAndLaboratoryWorkspaceId)
+    // was dropped in the microservices split: ComplianceReport only stores a flat
+    // laboratoryId and the module query service filters by laboratoryId.
     List<ComplianceReport> findByLaboratoryId(Long laboratoryId);
-
-    /** Workspace-scoped variant (QAS-05): only reports whose laboratory belongs to the workspace. */
-    List<ComplianceReport> findByLaboratoryIdAndLaboratoryWorkspaceId(Long laboratoryId, Long workspaceId);
 }
