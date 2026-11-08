@@ -1,5 +1,6 @@
 package com.test.backend.telemetry.resilience;
 
+import com.test.backend.shared.infrastructure.persistence.jpa.repositories.SharedEventOutboxRepository;
 import com.test.backend.telemetry.application.internal.services.TelemetryIngestionServiceImpl;
 import com.test.backend.telemetry.infrastructure.clients.SensorConfigurationClient;
 import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.MetricTypeRepository;
@@ -31,7 +32,8 @@ class TelemetryIngestionServiceResilienceTest {
                 Mockito.mock(SensorConfigurationClient.class),
                 Mockito.mock(SensorReadingRepository.class),
                 Mockito.mock(MetricTypeRepository.class),
-                Mockito.mock(ApplicationEventPublisher.class));
+                Mockito.mock(ApplicationEventPublisher.class),
+                Mockito.mock(SharedEventOutboxRepository.class));
     }
 
     @Test

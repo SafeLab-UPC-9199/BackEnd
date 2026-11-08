@@ -14,6 +14,28 @@ services:
     networks:
       - safelab-network
 
+  # ADR-005: broker de mensajes (RabbitMQ) que desacopla telemetry -> alerts.
+  # Las colas/intercambios se declaran de forma idempotente desde ambos
+  # servicios, por lo que este contenedor solo aporta el broker en si.
+  safelab-rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: safelab-rabbitmq
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: safelab
+      RABBITMQ_DEFAULT_PASS: safelab
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
+      start_period: 20s
+    networks:
+      - safelab-network
+
   safelab-backend-shared:
     build: ./backend-shared
     container_name: safelab-backend-shared
@@ -48,8 +70,13 @@ services:
       TELEMETRY_INGESTION_API_KEY: ${TELEMETRY_INGESTION_API_KEY:-}
       TELEMETRY_IDEMPOTENCY_TTL_MINUTES: 60
       AUTOMATION_SERVICE_URL: http://safelab-backend-automation:8086
+      SPRING_RABBITMQ_HOST: safelab-rabbitmq
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USER:-safelab}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-safelab}
     depends_on:
       - safelab-mysql
+      - safelab-rabbitmq
     networks:
       - safelab-network
 
@@ -64,8 +91,13 @@ services:
       DB_URL: jdbc:mysql://safelab-mysql:3306/safelab_alerts?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       DB_USER: root
       DB_PASSWORD: admin
+      SPRING_RABBITMQ_HOST: safelab-rabbitmq
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USER:-safelab}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-safelab}
     depends_on:
       - safelab-mysql
+      - safelab-rabbitmq
     networks:
       - safelab-network
 

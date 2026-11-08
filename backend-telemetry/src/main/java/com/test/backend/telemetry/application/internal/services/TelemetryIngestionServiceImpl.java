@@ -1,7 +1,13 @@
 package com.test.backend.telemetry.application.internal.services;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.test.backend.shared.domain.model.entities.SharedEventOutbox;
+import com.test.backend.shared.domain.model.events.SensorConfigurationDTO;
 import com.test.backend.shared.domain.model.events.TemperatureReadingRecorded;
+import com.test.backend.shared.infrastructure.messaging.MqTopology;
+import com.test.backend.shared.infrastructure.persistence.jpa.repositories.SharedEventOutboxRepository;
 import com.test.backend.telemetry.domain.model.aggregates.MetricType;
 import com.test.backend.telemetry.domain.model.aggregates.SensorReading;
 import com.test.backend.telemetry.domain.model.events.ReadingRejected;
@@ -26,10 +32,12 @@ import java.util.Optional;
  * Canonical telemetry ingestion pipeline (Iteration 1).
  * Responsibilities:
  *   1. Validate and persist sensor readings to the telemetry bounded context.
- *   2. Publish {@link TemperatureReadingRecorded} domain events for downstream
- *      contexts (alerts, labs, automation, history) to consume via their own
- *      event handlers. This service does NOT create alerts, history records,
- *      or lab metrics directly — those are owned by their respective services.
+ *   2. Record a {@link TemperatureReadingRecorded} domain event for downstream
+ *      contexts (alerts, labs, automation, history). The event is written to the
+ *      shared outbox (ADR-002) in the same transaction as the reading and is
+ *      published to RabbitMQ by the dispatcher (ADR-005), so telemetry never
+ *      calls alerts directly. This service does NOT create alerts, history
+ *      records, or lab metrics directly — those are owned by their services.
  */
 @Service
 @Transactional
@@ -41,16 +49,30 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
     private final SensorReadingRepository sensorReadingRepository;
     private final MetricTypeRepository metricTypeRepository;
     private final ApplicationEventPublisher applicationEventPublisher;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final SharedEventOutboxRepository sharedEventOutboxRepository;
+    private final ObjectMapper objectMapper = createObjectMapper();
 
     public TelemetryIngestionServiceImpl(SensorConfigurationClient sensorConfigurationClient,
                                          SensorReadingRepository sensorReadingRepository,
                                          MetricTypeRepository metricTypeRepository,
-                                         ApplicationEventPublisher applicationEventPublisher) {
+                                         ApplicationEventPublisher applicationEventPublisher,
+                                         SharedEventOutboxRepository sharedEventOutboxRepository) {
         this.sensorConfigurationClient = sensorConfigurationClient;
         this.sensorReadingRepository = sensorReadingRepository;
         this.metricTypeRepository = metricTypeRepository;
         this.applicationEventPublisher = applicationEventPublisher;
+        this.sharedEventOutboxRepository = sharedEventOutboxRepository;
+    }
+
+    /**
+     * Jackson mapper able to round-trip {@code LocalDateTime} (jsr310) as
+     * ISO-8601 text: the outbox payload is serialized here and deserialized by
+     * alerts, so the format must not depend on JVM defaults (array timestamps).
+     */
+    private static ObjectMapper createObjectMapper() {
+        return new ObjectMapper()
+                .findAndRegisterModules()
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     }
 
     @Override
@@ -77,7 +99,7 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
         }
     }
 
-    private void processTelemetryData(com.test.backend.shared.domain.model.events.SensorConfigurationDTO sensor, String payload) {
+    private void processTelemetryData(SensorConfigurationDTO sensor, String payload) {
         Map<String, Object> data;
         try {
             @SuppressWarnings("unchecked")
@@ -132,22 +154,50 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
             reading.setRecordedAt(recordedAt);
             sensorReadingRepository.save(reading);
 
-            // Publish domain event for decoupling (Iteration 1)
-            try {
-                applicationEventPublisher.publishEvent(new TemperatureReadingRecorded(
-                        reading.getId(),
-                        sensor.laboratoryId(),
-                        metricType.getId(),
-                        metricType.getKey(),
-                        val,
-                        recordedAt,
-                        null,  // minThreshold - resolved by alerts service
-                        null,  // maxThreshold - resolved by alerts service
-                        null   // labName - resolved by alerts service
-                ));
-            } catch (Exception ex) {
-                logger.debug("Failed to publish TemperatureReadingRecorded event: {}", ex.getMessage());
-            }
+            // Domain event for decoupling (Iteration 1): written to the shared
+            // outbox in this same transaction (ADR-002), then published to
+            // RabbitMQ by SharedEventOutboxDispatcher (ADR-005). No direct call
+            // to alerts, and no message can be lost between the commit and the
+            // broker — a broker outage simply leaves the row PENDING.
+            persistReadingRecorded(reading, sensor, metricType, val, recordedAt);
+        }
+    }
+
+    /**
+     * Serializes {@link TemperatureReadingRecorded} and appends it to the shared
+     * outbox. Runs inside the ingestion transaction, so the reading and its event
+     * commit (or roll back) together — the transactional-outbox guarantee of
+     * ADR-002. Thresholds and lab name stay null, exactly as before: alerts falls
+     * back to its default thermal limits when they are absent.
+     */
+    private void persistReadingRecorded(SensorReading reading, SensorConfigurationDTO sensor,
+                                        MetricType metricType, Double value, LocalDateTime recordedAt) {
+        try {
+            var event = new TemperatureReadingRecorded(
+                    reading.getId(),
+                    sensor.laboratoryId(),
+                    metricType.getId(),
+                    metricType.getKey(),
+                    value,
+                    recordedAt,
+                    null,  // minThreshold - resolved by alerts service
+                    null,  // maxThreshold - resolved by alerts service
+                    null   // labName - resolved by alerts service
+            );
+            var payload = objectMapper.writeValueAsString(event);
+            sharedEventOutboxRepository.save(new SharedEventOutbox(
+                    MqTopology.TEMPERATURE_READING_EVENT_TYPE,
+                    "SensorReading",
+                    String.valueOf(reading.getId()),
+                    payload,
+                    null,
+                    null,
+                    SharedEventOutbox.DEFAULT_SCHEMA_VERSION));
+        } catch (JsonProcessingException ex) {
+            // A reading that cannot be serialized must never break ingestion: the
+            // measurement is already stored, only its downstream evaluation is lost.
+            logger.warn("Failed to serialize TemperatureReadingRecorded for reading {}: {}",
+                    reading.getId(), ex.getMessage());
         }
     }
 

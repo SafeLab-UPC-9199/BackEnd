@@ -23,6 +23,16 @@ public class SharedEventOutboxDispatcher {
     @Value("${outbox.purge-after-days:7}")
     private int purgeAfterDays;
 
+    /**
+     * Comma-separated list of event types this instance is allowed to drain.
+     * The outbox is a single shared table, so without this filter every service
+     * running the dispatcher would race for every row: the shared service would
+     * mark telemetry's readings as PUBLISHED without ever handing them to the
+     * broker. Empty (default) = drain everything, i.e. the original behaviour.
+     */
+    @Value("${outbox.dispatch-event-types:}")
+    private String dispatchEventTypes;
+
     private final SharedEventOutboxRepository sharedEventOutboxRepository;
     private final ApplicationEventPublisher applicationEventPublisher;
 
@@ -37,8 +47,30 @@ public class SharedEventOutboxDispatcher {
     public void dispatchPendingEvents() {
         var pendingEvents = sharedEventOutboxRepository.findByStatus("PENDING");
         for (var event : pendingEvents) {
+            if (!isResponsibleFor(event.getEventType())) {
+                continue;
+            }
             dispatch(event);
         }
+    }
+
+    /**
+     * True when this instance owns {@code eventType}. See
+     * {@code outbox.dispatch-event-types}: each service drains only the event
+     * types it publishes, so no two dispatchers can mark the same row
+     * PUBLISHED (at-least-once delivery depends on a single owner per type).
+     */
+    private boolean isResponsibleFor(String eventType) {
+        if (dispatchEventTypes == null || dispatchEventTypes.isBlank()) {
+            return true;
+        }
+        for (String owned : dispatchEventTypes.split(",")) {
+            if (eventType != null && eventType.equals(owned.trim())) {
+                return true;
+            }
+        }
+        logger.debug("Skipping outbox event {}: owned by another service", eventType);
+        return false;
     }
 
     @Scheduled(cron = "${outbox.purge-cron:0 0 2 * * *}")

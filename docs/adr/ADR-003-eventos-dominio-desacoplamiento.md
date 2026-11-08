@@ -14,7 +14,7 @@ Se implementa desacoplamiento mediante eventos de dominio:
 
 1. **Evento TemperatureReadingRecorded:** Publicado por el servicio `telemetry` tras persistir una lectura válida. Contiene readingId, laboratoryId, metricTypeId, metricKey, value, recordedAt y campos opcionales para umbrales y nombre del laboratorio.
 
-2. **Consumidor en alerts:** `@EventListener` en `backend-alerts` que recibe `TemperatureReadingRecorded` y ejecuta `EvaluateReadingUseCase` para evaluar si se debe generar una alerta o incidente.
+2. **Consumidor en alerts:** recibe `TemperatureReadingRecorded` y ejecuta `EvaluateReadingUseCase` para evaluar si se debe generar una alerta o incidente. En el monolito es un `@EventListener`; en la topología de microservicios (Fase 5 / ADR-005) es un `@RabbitListener` sobre RabbitMQ, porque el consumidor corre en otro proceso.
 
 3. **Sin acoplamiento directo:** `telemetry` no depende de `alerts` ni hace llamadas Feign a él. La comunicación es unidireccional a través del evento.
 
@@ -32,4 +32,4 @@ Se implementa desacoplamiento mediante eventos de dominio:
 ## Alternativas consideradas
 
 - **Llamada síncrona Feign de telemetry a alerts:** Rechazado por crear acoplamiento sincrónico y punto de falla en cadena
-- **Cola de mensajes externa (RabbitMQ/Kafka):** Rechazado por requerir infraestructura adicional no disponible en el alcance académico
+- **Cola de mensajes externa (RabbitMQ/Kafka):** Rechazado por requerir infraestructura adicional no disponible en el alcance académico → **subsanado por ADR-005**, que incorpora RabbitMQ al stack local y sustituye el `@EventListener` in-process por un `@RabbitListener` con DLQ e idempotencia.
