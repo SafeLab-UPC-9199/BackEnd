@@ -47,6 +47,7 @@ services:
       MQTT_PORT: 8883
       TELEMETRY_INGESTION_API_KEY: ${TELEMETRY_INGESTION_API_KEY:-}
       TELEMETRY_IDEMPOTENCY_TTL_MINUTES: 60
+      AUTOMATION_SERVICE_URL: http://safelab-backend-automation:8086
     depends_on:
       - safelab-mysql
     networks:

@@ -1,10 +1,8 @@
 package com.test.backend.telemetry.interfaces.rest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.test.backend.shared.domain.model.events.SensorConfigurationDTO;
 import com.test.backend.telemetry.domain.services.TelemetryIngestionService;
 import com.test.backend.telemetry.interfaces.rest.resources.TelemetryIngestionResource;
-import com.test.backend.telemetry.infrastructure.clients.SensorConfigurationClient;
 import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.TelemetryIngestionIdempotencyRepository;
 import com.test.backend.telemetry.domain.model.entities.TelemetryIngestionIdempotency;
 import io.swagger.v3.oas.annotations.Operation;
@@ -36,20 +34,17 @@ public class TelemetryIngestionController {
     private final String apiKey;
     private final String hmacSecret;
     private final TelemetryIngestionIdempotencyRepository idempotencyRepository;
-    private final SensorConfigurationClient sensorConfigurationClient;
     private final long idempotencyTtlMinutes;
 
     public TelemetryIngestionController(TelemetryIngestionService telemetryIngestionService,
                                         @Value("${telemetry.ingestion.api-key:}") String apiKey,
                                         @Value("${telemetry.ingestion.hmac-secret:}") String hmacSecret,
                                         TelemetryIngestionIdempotencyRepository idempotencyRepository,
-                                        SensorConfigurationClient sensorConfigurationClient,
                                         @Value("${telemetry.idempotency.ttl-minutes:60}") long idempotencyTtlMinutes) {
         this.telemetryIngestionService = telemetryIngestionService;
         this.apiKey = apiKey;
         this.hmacSecret = hmacSecret;
         this.idempotencyRepository = idempotencyRepository;
-        this.sensorConfigurationClient = sensorConfigurationClient;
         this.idempotencyTtlMinutes = idempotencyTtlMinutes;
     }
 
@@ -114,14 +109,9 @@ public class TelemetryIngestionController {
             ));
         }
 
-        // Validate sensor via automation service (Feign client)
-        var sensorOpt = sensorConfigurationClient.findByUnit(resource.unit());
-        if (sensorOpt.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
-                    "status", "ERROR",
-                    "message", "Unregistered sensor unit: " + resource.unit()
-            ));
-        }
+        // Sensor validation happens inside TelemetryIngestionServiceImpl.ingest(),
+        // which is guarded by the resilience4j circuit breaker + retry (ADR-004).
+        // An unregistered unit surfaces here as IllegalArgumentException -> 404.
 
         // Signature verification (shared secret when configured)
         String requiredSecret = hmacConfigured() ? hmacSecret : null;

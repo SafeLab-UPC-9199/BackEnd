@@ -152,10 +152,18 @@ public class TelemetryIngestionServiceImpl implements TelemetryIngestionService 
     }
 
     /**
-     * Fallback invoked when the labs/alerts service is unavailable (circuit open).
-     * Logs the failure but does not block telemetry ingestion.
+     * Fallback invoked when the dependent service (automation) is unreachable or
+     * the circuit breaker is open (ADR-004): telemetry ingestion continues with
+     * reduced functionality instead of failing the request.
+     *
+     * <p>Client errors (unregistered sensor) are re-thrown so the REST layer can
+     * answer 404 as documented — they are configured as {@code ignoreExceptions}
+     * of the circuit breaker, so a wave of unknown units never opens the circuit.
      */
     public void ingestFallback(String unit, String payload, Throwable throwable) {
+        if (throwable instanceof IllegalArgumentException clientError) {
+            throw clientError;
+        }
         logger.warn("Circuit breaker fallback for ingest(unit={}): {}", unit, throwable.getMessage());
         // Telemetry ingestion continues; downstream alert evaluation will be handled
         // when the circuit closes again.

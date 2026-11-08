@@ -101,6 +101,11 @@ public class SensorConfigurationController {
         config.setMinThreshold(command.minThreshold());
         config.setMaxThreshold(command.maxThreshold());
         config.setWarningThreshold(command.warningThreshold());
+        // laboratoryId/isActive were dropped here: sensor_readings.laboratory_id
+        // is NOT NULL, so telemetry ingestion failed (and degraded through the
+        // circuit breaker fallback) for every sensor created through this API.
+        config.setLaboratoryId(command.laboratoryId());
+        config.setActive(command.isActive());
         config.setStatus("ACTIVE");
 
         var saved = sensorConfigurationRepository.save(config);
