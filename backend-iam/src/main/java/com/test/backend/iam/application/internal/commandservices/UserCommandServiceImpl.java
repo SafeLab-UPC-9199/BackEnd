@@ -57,6 +57,7 @@ public class UserCommandServiceImpl implements UserCommandService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Optional<AuthenticatedUser> handle(SignInCommand command) {
         var user = userRepository.findByEmail(command.email());
         if (user.isEmpty()) {
@@ -68,8 +69,27 @@ public class UserCommandServiceImpl implements UserCommandService {
         if (!user.get().isConfirmed()) {
             throw new UserNotConfirmedException("User account is not confirmed");
         }
-        var token = tokenService.generateToken(user.get().getEmail());
+        var roles = user.get().getRoles().stream().map(Role::getStringName).toList();
+        var token = tokenService.generateToken(user.get().getEmail(), roles, resolveWorkspaceId(user.get().getEmail()));
         return Optional.of(new AuthenticatedUser(user.get(), token));
+    }
+
+    /**
+     * Best-effort workspace claim for the token (Fase 6, ADR-006). The caller's
+     * workspace lives in automation's user_profiles; when the profile does not
+     * exist yet (or the schema is unavailable) the token is issued without the
+     * claim and services fall back to the seeded base workspace.
+     */
+    private Long resolveWorkspaceId(String email) {
+        try {
+            Object result = entityManager.createNativeQuery(
+                    "SELECT workspace_id FROM safelab_automation.user_profiles WHERE email = ?1")
+                    .setParameter(1, email)
+                    .getSingleResult();
+            return result == null ? null : Long.parseLong(result.toString());
+        } catch (Exception e) {
+            return null;
+        }
     }
 
 

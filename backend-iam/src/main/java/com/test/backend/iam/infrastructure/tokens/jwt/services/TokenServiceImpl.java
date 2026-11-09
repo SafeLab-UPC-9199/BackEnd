@@ -12,7 +12,9 @@ import org.springframework.util.StringUtils;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
+import java.util.Collection;
 import java.util.Date;
+import java.util.List;
 
 @Service
 public class TokenServiceImpl implements BearerTokenService {
@@ -34,12 +36,24 @@ public class TokenServiceImpl implements BearerTokenService {
 
     @Override
     public String generateToken(String email) {
+        return generateToken(email, List.of(), null);
+    }
+
+    @Override
+    public String generateToken(String email, Collection<String> roles, Long workspaceId) {
         var now = new Date();
         var expiration = new Date(now.getTime() + (long) expirationDays * 24 * 60 * 60 * 1000);
-        return Jwts.builder()
+        var builder = Jwts.builder()
                 .subject(email)
                 .issuedAt(now)
-                .expiration(expiration)
+                .expiration(expiration);
+        if (roles != null && !roles.isEmpty()) {
+            builder.claim("roles", List.copyOf(roles));
+        }
+        if (workspaceId != null) {
+            builder.claim("workspaceId", workspaceId);
+        }
+        return builder
                 .signWith(getSigningKey(), Jwts.SIG.HS256)
                 .compact();
     }
