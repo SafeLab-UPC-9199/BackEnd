@@ -23,7 +23,11 @@
 	<properties>
 		<java.version>24</java.version>
 		<spring-boot.version>4.0.6</spring-boot.version>
-		<test.excluded.groups>it</test.excluded.groups>
+		<!-- Test separation (Fase 7): 'it' = integration (Docker/Testcontainers)
+		     and 'performance' = load/latency benchmarks (need the stack up) are
+		     excluded from the default build. Run everything with:
+		     mvn test -Dtest.excluded.groups= -->
+		<test.excluded.groups>it,performance</test.excluded.groups>
 		<!-- Versiones centralizadas -->
 		<springdoc.version>3.0.2</springdoc.version>
 		<resilience4j.version>2.2.0</resilience4j.version>
