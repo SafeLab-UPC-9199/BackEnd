@@ -3,9 +3,9 @@ package com.test.backend.alerts.test.bdd.steps;
 import io.cucumber.java.en.Given;
 import io.cucumber.java.en.Then;
 import io.cucumber.java.en.When;
-import org.springframework.boot.test.context.SpringBootTest;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+// No @SpringBootTest: the steps below are stubs that never touch the context,
+// and booting the full app here would require a live MySQL just to "pass".
 public class AlertManagementSteps {
 
     @Given("que existe una lectura de temperatura fuera de rango en el laboratorio {string}")

@@ -165,6 +165,19 @@
 			</dependency>
 		</dependencies>
 	</dependencyManagement>
+	<dependencies>
+		<!-- JUnit 4 bridge: the three Cucumber suites (telemetry, alerts, iam)
+		     run through @RunWith(Cucumber.class) from cucumber-junit, a JUnit 4
+		     runner. The build only carries the Jupiter engine, so without the
+		     vintage engine surefire silently discovers 0 tests from them and the
+		     .feature files never execute. Version comes from the Spring Boot BOM
+		     (junit-bom), scope test only. -->
+		<dependency>
+			<groupId>org.junit.vintage</groupId>
+			<artifactId>junit-vintage-engine</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
 	<build>
 		<pluginManagement>
 			<plugins>

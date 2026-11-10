@@ -14,15 +14,18 @@ public class AuthenticationSteps {
     private String lastEmail;
     private int lastStatusCode;
     private String lastBody;
+    private boolean userRegistered;
 
     @Given("que no existe un usuario con el email {string}")
     public void no_existe_usuario(String email) {
         this.lastEmail = email;
+        this.userRegistered = false;
     }
 
     @Given("que existe un usuario registrado con email {string}")
     public void existe_usuario(String email) {
         this.lastEmail = email;
+        this.userRegistered = true;
     }
 
     @When("envío una petición POST a {string}")
@@ -37,7 +40,7 @@ public class AuthenticationSteps {
         }
     }
 
-    @When("envío una petición POST a {string} Con body:")
+    @When("envío una petición POST a {string} con body:")
     public void envio_post_con_body(String endpoint, io.cucumber.datatable.DataTable table) {
         Map<String, String> row = table.asMap(String.class, String.class);
         if ("/api/v1/authentication/sign-in".equals(endpoint)) {
@@ -49,7 +52,8 @@ public class AuthenticationSteps {
                 this.lastBody = "{\"token\":\"jwt-token-123\"}";
             }
         } else if ("/api/v1/authentication/sign-up".equals(endpoint)) {
-            if ("operador@safelab.edu.pe".equals(row.get("email"))) {
+            // El estado (usuario ya registrado o no) lo fijan los pasos Dado
+            if (this.userRegistered) {
                 this.lastStatusCode = 409;
                 this.lastBody = "{\"error\":\"User already exists\"}";
             } else {

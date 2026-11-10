@@ -1,5 +1,6 @@
+# language: es
 @alerts @incident
-Funcionalidad: Gestión de alertas e incidentes (US08 / US24 - Alertas térmicas)
+Característica: Gestión de alertas e incidentes (US08 / US24 - Alertas térmicas)
 
   Como operador de laboratorio
   Quiero recibir alertas cuando se detecten excursiones térmicas
