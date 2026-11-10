@@ -36,6 +36,22 @@ services:
     networks:
       - safelab-network
 
+  # Fase 7: broker MQTT local que backend-telemetry suscribe (topic safelab/#).
+  # El compose ya apuntaba a MQTT_HOST=safelab-mqtt pero el servicio no existia
+  # (UnknownHostException al arrancar) y el puerto indicado era 8883/TLS mientras
+  # el cliente usa mqtt.protocol=tcp por defecto. Se levanta Mosquitto anónimo en
+  # la red interna del proyecto (1883 publicado para simuladores del host).
+  safelab-mqtt:
+    image: eclipse-mosquitto:2
+    container_name: safelab-mqtt
+    restart: always
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks:
+      - safelab-network
+
   safelab-backend-shared:
     build: ./backend-shared
     container_name: safelab-backend-shared
@@ -66,7 +82,8 @@ services:
       DB_PASSWORD: admin
       MQTT_ENABLED: "true"
       MQTT_HOST: safelab-mqtt
-      MQTT_PORT: 8883
+      MQTT_PORT: "1883"
+      MQTT_PROTOCOL: tcp
       TELEMETRY_INGESTION_API_KEY: ${TELEMETRY_INGESTION_API_KEY:-}
       TELEMETRY_IDEMPOTENCY_TTL_MINUTES: 60
       AUTOMATION_SERVICE_URL: http://safelab-backend-automation:8086
@@ -77,6 +94,7 @@ services:
     depends_on:
       - safelab-mysql
       - safelab-rabbitmq
+      - safelab-mqtt
     networks:
       - safelab-network
 
