@@ -11,6 +11,7 @@ import com.test.backend.iam.interfaces.rest.transform.AuthenticatedUserResourceF
 import com.test.backend.iam.interfaces.rest.transform.SignInCommandFromResourceAssembler;
 import com.test.backend.iam.interfaces.rest.transform.SignUpCommandFromResourceAssembler;
 import com.test.backend.iam.interfaces.rest.transform.UserResourceFromEntityAssembler;
+import com.test.backend.shared.infrastructure.security.RequestIdentity;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -132,6 +133,10 @@ public class AuthenticationController {
     @DeleteMapping("/clean-test-users")
     @Operation(summary = "Clean Test Users", description = "Deletes all registered test users and their profiles, keeping only the default administrator.")
     public ResponseEntity<Void> cleanTestUsers() {
+        // QAS-05: destructive admin operation - no longer permitAll, Administrator only.
+        if (!RequestIdentity.isAdmin()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         userCommandService.handleCleanTestUsers();
         return ResponseEntity.ok().build();
     }
