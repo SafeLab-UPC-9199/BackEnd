@@ -1,6 +1,10 @@
 package com.test.backend.alerts.interfaces.rest;
 
 import com.test.backend.alerts.domain.model.commands.DeleteAlertCommand;
+import com.test.backend.alerts.domain.model.commands.AcknowledgeAlertCommand;
+import com.test.backend.alerts.domain.model.commands.AttendAlertCommand;
+import com.test.backend.alerts.domain.model.commands.ResolveAlertCommand;
+import com.test.backend.alerts.domain.model.commands.CloseAlertCommand;
 import com.test.backend.alerts.domain.model.queries.GetAllAlertsQuery;
 import com.test.backend.alerts.domain.model.queries.GetAlertByIdQuery;
 import com.test.backend.alerts.domain.services.AlertCommandService;
@@ -72,6 +76,78 @@ public class AlertController {
         var result = alertCommandService.handle(command);
         return result.map(alert -> new ResponseEntity<>(AlertResourceFromEntityAssembler.toResourceFromEntity(alert), HttpStatus.CREATED))
                 .orElseGet(() -> ResponseEntity.badRequest().build());
+    }
+
+    @PostMapping("/{id}/acknowledge")
+    @Operation(summary = "Acknowledge alert", description = "Acknowledges alert responsibility")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Alert acknowledged successfully"),
+            @ApiResponse(responseCode = "400", description = "Illegal state transition attempted"),
+            @ApiResponse(responseCode = "404", description = "Alert not found")
+    })
+    public ResponseEntity<?> acknowledgeAlert(@PathVariable Long id) {
+        try {
+            var command = new AcknowledgeAlertCommand(id);
+            var result = alertCommandService.handle(command);
+            return result.map(alert -> ResponseEntity.ok(AlertResourceFromEntityAssembler.toResourceFromEntity(alert)))
+                    .orElseGet(() -> ResponseEntity.notFound().build());
+        } catch (IllegalStateException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostMapping("/{id}/attend")
+    @Operation(summary = "Attend alert", description = "Transitions alert status to IN_PROGRESS")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Alert transitioned to IN_PROGRESS successfully"),
+            @ApiResponse(responseCode = "400", description = "Illegal state transition attempted"),
+            @ApiResponse(responseCode = "404", description = "Alert not found")
+    })
+    public ResponseEntity<?> attendAlert(@PathVariable Long id) {
+        try {
+            var command = new AttendAlertCommand(id);
+            var result = alertCommandService.handle(command);
+            return result.map(alert -> ResponseEntity.ok(AlertResourceFromEntityAssembler.toResourceFromEntity(alert)))
+                    .orElseGet(() -> ResponseEntity.notFound().build());
+        } catch (IllegalStateException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostMapping("/{id}/resolve")
+    @Operation(summary = "Resolve alert", description = "Resolves an active alert")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Alert resolved successfully"),
+            @ApiResponse(responseCode = "400", description = "Illegal state transition attempted"),
+            @ApiResponse(responseCode = "404", description = "Alert not found")
+    })
+    public ResponseEntity<?> resolveAlert(@PathVariable Long id) {
+        try {
+            var command = new ResolveAlertCommand(id);
+            var result = alertCommandService.handle(command);
+            return result.map(alert -> ResponseEntity.ok(AlertResourceFromEntityAssembler.toResourceFromEntity(alert)))
+                    .orElseGet(() -> ResponseEntity.notFound().build());
+        } catch (IllegalStateException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostMapping("/{id}/close")
+    @Operation(summary = "Close alert", description = "Formally closes a resolved alert")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Alert closed successfully"),
+            @ApiResponse(responseCode = "400", description = "Alert must be resolved before it can be closed"),
+            @ApiResponse(responseCode = "404", description = "Alert not found")
+    })
+    public ResponseEntity<?> closeAlert(@PathVariable Long id) {
+        try {
+            var command = new CloseAlertCommand(id);
+            var result = alertCommandService.handle(command);
+            return result.map(alert -> ResponseEntity.ok(AlertResourceFromEntityAssembler.toResourceFromEntity(alert)))
+                    .orElseGet(() -> ResponseEntity.notFound().build());
+        } catch (IllegalStateException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
     }
 
     @PutMapping("/{id}")

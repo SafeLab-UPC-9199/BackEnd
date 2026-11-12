@@ -14,7 +14,7 @@ import lombok.AllArgsConstructor;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "lab_user_accesses")
+@Table(name = "lab_user_accesses", catalog = "safelab_automation")
 public class LabUserAccess extends AuditableModel {
 
     @ManyToOne

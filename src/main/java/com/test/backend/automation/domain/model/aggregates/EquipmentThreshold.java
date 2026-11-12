@@ -13,7 +13,7 @@ import lombok.AllArgsConstructor;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "equipment_thresholds")
+@Table(name = "equipment_thresholds", catalog = "safelab_automation")
 public class EquipmentThreshold extends AuditableAbstractAggregateRoot<EquipmentThreshold> {
 
     @ManyToOne

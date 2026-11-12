@@ -1,6 +1,8 @@
 package com.test.backend.telemetry.interfaces.rest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.test.backend.automation.domain.model.aggregates.SensorConfiguration;
+import com.test.backend.automation.infrastructure.persistence.jpa.repositories.SensorConfigurationRepository;
 import com.test.backend.telemetry.domain.services.TelemetryIngestionService;
 import com.test.backend.telemetry.interfaces.rest.resources.TelemetryIngestionResource;
 import com.test.backend.telemetry.infrastructure.persistence.jpa.repositories.TelemetryIngestionIdempotencyRepository;
@@ -27,12 +29,18 @@ import java.util.Optional;
 /**
  * HTTP ingestion endpoint (Iteration 1): alternative transport for edge
  * devices that cannot use MQTT. Authenticated with a shared {@code X-Api-Key}
- * header instead of a JWT (machine-to-machine), and — when
- * {@code telemetry.ingestion.hmac-secret} is configured — the device signature
- * {@code X-Signature} (hex HMAC-SHA256 of the raw body) is verified before the
- * frame is injected into the canonical pipeline.
+ * header instead of a JWT (machine-to-machine) and — per-device signature —
+ * {@code X-Signature} (hex HMAC-SHA256 of the raw body):
+ * <ul>
+ *   <li>if the sensor registered for the frame's unit carries a {@code deviceSecret},
+ *       the frame MUST verify against that device's own key (fail-closed, the shared
+ *       deployment secret does not satisfy it);</li>
+ *   <li>otherwise, when {@code telemetry.ingestion.hmac-secret} is configured, the
+ *       shared-secret signature is verified as before;</li>
+ *   <li>with neither configured, no signature is required (legacy deployments).</li>
+ * </ul>
  */
-@Tag(name = "Telemetry Ingestion", description = "HTTP ingestion endpoint for edge devices (X-Api-Key + optional X-Signature)")
+@Tag(name = "Telemetry Ingestion", description = "HTTP ingestion endpoint for edge devices (X-Api-Key + X-Signature per device)")
 @RestController
 @RequestMapping("/api/v1/telemetry/ingestion")
 public class TelemetryIngestionController {
@@ -42,26 +50,31 @@ public class TelemetryIngestionController {
     private final String apiKey;
     private final String hmacSecret;
     private final TelemetryIngestionIdempotencyRepository idempotencyRepository;
+    private final SensorConfigurationRepository sensorConfigurationRepository;
     private final long idempotencyTtlMinutes;
 
     public TelemetryIngestionController(TelemetryIngestionService telemetryIngestionService,
                                         @Value("${telemetry.ingestion.api-key:}") String apiKey,
                                         @Value("${telemetry.ingestion.hmac-secret:}") String hmacSecret,
                                         TelemetryIngestionIdempotencyRepository idempotencyRepository,
+                                        SensorConfigurationRepository sensorConfigurationRepository,
                                         @Value("${telemetry.idempotency.ttl-minutes:60}") long idempotencyTtlMinutes) {
         this.telemetryIngestionService = telemetryIngestionService;
         this.apiKey = apiKey;
         this.hmacSecret = hmacSecret;
         this.idempotencyRepository = idempotencyRepository;
+        this.sensorConfigurationRepository = sensorConfigurationRepository;
         this.idempotencyTtlMinutes = idempotencyTtlMinutes;
     }
 
     @PostMapping
     @Operation(
             summary = "Ingest a telemetry payload over HTTP",
-            description = "Requires X-Api-Key header matching telemetry.ingestion.api-key. When "
-                    + "telemetry.ingestion.hmac-secret is set, also requires X-Signature (hex HMAC-SHA256 "
-                    + "of the raw body). Payload follows the same shape as the MQTT telemetry topic."
+            description = "Requires X-Api-Key header matching telemetry.ingestion.api-key. Frames are also "
+                    + "signed: if the sensor registered for the unit has a per-device secret, X-Signature must "
+                    + "be hex HMAC-SHA256 of the raw body with that secret; otherwise, when "
+                    + "telemetry.ingestion.hmac-secret is set, the shared secret applies. Payload follows the "
+                    + "same shape as the MQTT telemetry topic."
     )
     @ApiResponses(value = {
             @ApiResponse(responseCode = "202", description = "Telemetry accepted and processed"),
@@ -118,11 +131,22 @@ public class TelemetryIngestionController {
             ));
         }
 
-        // Device signature (integrity of the frame) — fail-closed when configured.
-        if (hmacConfigured() && !isValidSignature(rawBody, signature)) {
+        // Per-device signature (firma por dispositivo): the sensor registered for this
+        // unit carries its own HMAC key; when present it takes precedence and the frame
+        // MUST be signed with it (fail-closed). Otherwise fall back to the shared
+        // deployment secret when configured.
+        String deviceSecret = sensorConfigurationRepository.findByUnit(resource.unit())
+                .map(SensorConfiguration::getDeviceSecret)
+                .filter(secret -> secret != null && !secret.isBlank())
+                .orElse(null);
+        String requiredSecret = deviceSecret != null ? deviceSecret : (hmacConfigured() ? hmacSecret : null);
+        if (requiredSecret != null && !isValidSignature(requiredSecret, rawBody, signature)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
                     "status", "ERROR",
-                    "message", "Missing or invalid X-Signature (HMAC-SHA256 of the raw body)."
+                    "message", deviceSecret != null
+                            ? "Missing or invalid X-Signature: this device must sign with its own key "
+                              + "(hex HMAC-SHA256 of the raw body)."
+                            : "Missing or invalid X-Signature (HMAC-SHA256 of the raw body)."
             ));
         }
 
@@ -174,16 +198,16 @@ public class TelemetryIngestionController {
 
     /**
      * Verifies {@code X-Signature} = hex(HMAC-SHA256(rawBody, secret)) using a
-     * constant-time comparison. Skipped (returns true) when no secret is
-     * configured, for backwards compatibility with existing deployments.
+     * constant-time comparison against the given secret (per-device key when the
+     * sensor has one, the shared deployment secret otherwise).
      */
-    private boolean isValidSignature(String rawBody, String signature) {
+    private boolean isValidSignature(String secret, String rawBody, String signature) {
         if (signature == null || signature.isBlank()) {
             return false;
         }
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(hmacSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             String expected = HexFormat.of().formatHex(mac.doFinal(rawBody.getBytes(StandardCharsets.UTF_8)));
             return MessageDigest.isEqual(
                     expected.getBytes(StandardCharsets.UTF_8),

@@ -17,6 +17,7 @@ import java.util.List;
 @AllArgsConstructor
 @Table(
     name = "audit_trails",
+    catalog = "safelab_compliance",
     indexes = {
         @Index(name = "idx_audit_trails_target_id", columnList = "target_id")
     }

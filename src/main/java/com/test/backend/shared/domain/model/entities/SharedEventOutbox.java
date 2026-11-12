@@ -15,7 +15,7 @@ import java.util.UUID;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "event_outbox")
+@Table(name = "event_outbox", catalog = "safelab_shared")
 public class SharedEventOutbox extends AuditableModel {
 
     /**
@@ -24,6 +24,8 @@ public class SharedEventOutbox extends AuditableModel {
      */
     public static final String DEFAULT_SCHEMA_VERSION = "1.0";
 
+    // id is inherited from AuditableModel (@Id + identity). Hibernate 7 forbids
+    // the subclass from respecifying the generation strategy.
     @Column(name = "event_id", nullable = false, unique = true, length = 64)
     private String eventId;
 

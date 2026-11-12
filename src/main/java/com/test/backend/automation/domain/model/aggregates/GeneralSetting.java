@@ -12,7 +12,7 @@ import lombok.AllArgsConstructor;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "general_settings")
+@Table(name = "general_settings", catalog = "safelab_automation")
 public class GeneralSetting extends AuditableAbstractAggregateRoot<GeneralSetting> {
 
     @Column(name = "setting_key", unique = true, nullable = false)

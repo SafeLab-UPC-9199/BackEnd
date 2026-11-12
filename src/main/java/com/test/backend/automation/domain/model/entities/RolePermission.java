@@ -12,7 +12,7 @@ import lombok.AllArgsConstructor;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "role_permissions")
+@Table(name = "role_permissions", catalog = "safelab_automation")
 public class RolePermission extends AuditableModel {
 
     @ManyToOne

@@ -13,7 +13,7 @@ import lombok.AllArgsConstructor;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "lab_schedules")
+@Table(name = "lab_schedules", catalog = "safelab_labs")
 public class LabSchedule extends AuditableModel {
 
     @ManyToOne

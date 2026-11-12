@@ -2,45 +2,231 @@ services:
   safelab-mysql:
     image: mysql:8.0
     container_name: safelab-mysql
-    restart: unless-stopped
+    restart: always
     environment:
       MYSQL_ROOT_PASSWORD: admin
-      MYSQL_DATABASE: safelab_db
+      MYSQL_DATABASE: safelab_shared
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
-      - safelab_mysql_data:/var/lib/mysql
-      - ./init_safelab.sql:/docker-entrypoint-initdb.d/init_safelab.sql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-padmin"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 15s
+      - safelab-mysql-data:/var/lib/mysql
+      - ./init_safelab.sql:/docker-entrypoint-initdb.d/init_safelab.sql:ro
+    networks:
+      - safelab-network
 
-  safelab-backend:
-    image: safelab-backend:latest
-    container_name: safelab-backend
-    restart: unless-stopped
+  # ADR-005: broker de mensajes (RabbitMQ) que desacopla telemetry -> alerts.
+  # Las colas/intercambios se declaran de forma idempotente desde ambos
+  # servicios, por lo que este contenedor solo aporta el broker en si.
+  safelab-rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: safelab-rabbitmq
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: safelab
+      RABBITMQ_DEFAULT_PASS: safelab
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 6
+      start_period: 20s
+    networks:
+      - safelab-network
+
+  # Fase 7: broker MQTT local que backend-telemetry suscribe (topic safelab/#).
+  # El compose ya apuntaba a MQTT_HOST=safelab-mqtt pero el servicio no existia
+  # (UnknownHostException al arrancar) y el puerto indicado era 8883/TLS mientras
+  # el cliente usa mqtt.protocol=tcp por defecto. Se levanta Mosquitto anónimo en
+  # la red interna del proyecto (1883 publicado para simuladores del host).
+  safelab-mqtt:
+    image: eclipse-mosquitto:2
+    container_name: safelab-mqtt
+    restart: always
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks:
+      - safelab-network
+
+  safelab-backend-shared:
+    build: ./backend-shared
+    container_name: safelab-backend-shared
+    restart: always
+    ports:
+      - "8090:8090"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_URL: jdbc:mysql://safelab-mysql:3306/safelab_shared?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DB_USER: root
+      DB_PASSWORD: admin
+      MQTT_ENABLED: "false"
     depends_on:
-      safelab-mysql:
-        condition: service_healthy
+      - safelab-mysql
+    networks:
+      - safelab-network
+
+  safelab-backend-telemetry:
+    build: ./backend-telemetry
+    container_name: safelab-backend-telemetry
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_URL: jdbc:mysql://safelab-mysql:3306/safelab_telemetry?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DB_USER: root
+      DB_PASSWORD: admin
+      MQTT_ENABLED: "true"
+      MQTT_HOST: safelab-mqtt
+      MQTT_PORT: "1883"
+      MQTT_PROTOCOL: tcp
+      TELEMETRY_INGESTION_API_KEY: ${TELEMETRY_INGESTION_API_KEY:-}
+      TELEMETRY_IDEMPOTENCY_TTL_MINUTES: 60
+      AUTOMATION_SERVICE_URL: http://safelab-backend-automation:8086
+      SPRING_RABBITMQ_HOST: safelab-rabbitmq
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USER:-safelab}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-safelab}
+    depends_on:
+      - safelab-mysql
+      - safelab-rabbitmq
+      - safelab-mqtt
+    networks:
+      - safelab-network
+
+  safelab-backend-alerts:
+    build: ./backend-alerts
+    container_name: safelab-backend-alerts
+    restart: always
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_URL: jdbc:mysql://safelab-mysql:3306/safelab_alerts?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DB_USER: root
+      DB_PASSWORD: admin
+      SPRING_RABBITMQ_HOST: safelab-rabbitmq
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USER:-safelab}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-safelab}
+    depends_on:
+      - safelab-mysql
+      - safelab-rabbitmq
+    networks:
+      - safelab-network
+
+  safelab-backend-labs:
+    build: ./backend-labs
+    container_name: safelab-backend-labs
+    restart: always
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_URL: jdbc:mysql://safelab-mysql:3306/safelab_labs?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DB_USER: root
+      DB_PASSWORD: admin
+    depends_on:
+      - safelab-mysql
+    networks:
+      - safelab-network
+
+  safelab-backend-iam:
+    build: ./backend-iam
+    container_name: safelab-backend-iam
+    restart: always
+    ports:
+      - "8084:8084"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_URL: jdbc:mysql://safelab-mysql:3306/safelab_iam?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DB_USER: root
+      DB_PASSWORD: admin
+      # Same env var the app actually reads (authorization.jwt.secret); the
+      # gateway gets the identical value so both sides validate the same JWT.
+      JWT_SECRET: ${JWT_SECRET:-SafeLabSecretKeyForJwtTokenGeneration2026SecureKey32BytesLong!}
+    depends_on:
+      - safelab-mysql
+    networks:
+      - safelab-network
+
+  safelab-backend-compliance:
+    build: ./backend-compliance
+    container_name: safelab-backend-compliance
+    restart: always
+    ports:
+      - "8085:8085"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_URL: jdbc:mysql://safelab-mysql:3306/safelab_compliance?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DB_USER: root
+      DB_PASSWORD: admin
+    depends_on:
+      - safelab-mysql
+    networks:
+      - safelab-network
+
+  safelab-backend-automation:
+    build: ./backend-automation
+    container_name: safelab-backend-automation
+    restart: always
+    ports:
+      - "8086:8086"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_URL: jdbc:mysql://safelab-mysql:3306/safelab_automation?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DB_USER: root
+      DB_PASSWORD: admin
+    depends_on:
+      - safelab-mysql
+    networks:
+      - safelab-network
+
+  safelab-backend-history:
+    build: ./backend-history
+    container_name: safelab-backend-history
+    restart: always
+    ports:
+      - "8087:8087"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_URL: jdbc:mysql://safelab-mysql:3306/safelab_history?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DB_USER: root
+      DB_PASSWORD: admin
+    depends_on:
+      - safelab-mysql
+    networks:
+      - safelab-network
+
+  safelab-gateway:
+    build: ./gateway
+    container_name: safelab-gateway
+    restart: always
     ports:
       - "8080:8080"
     environment:
-      SPRING_PROFILES_ACTIVE: dev
-      SPRING_DATASOURCE_URL: jdbc:mysql://safelab-mysql:3306/safelab_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
-      SPRING_DATASOURCE_USERNAME: root
-      SPRING_DATASOURCE_PASSWORD: admin
-      SPRING_JPA_HIBERNATE_DDL_AUTO: update
-      AUTHORIZATION_JWT_SECRET: SafeLabSecretKeyForJwtTokenGeneration2026SecureKey32BytesLong!
-      AUTHORIZATION_JWT_EXPIRATION_DAYS: 50
-      MQTT_HOST: broker.hivemq.com
-      # MQTT v5 over TLS (Iteration 1). Fallback: MQTT_PROTOCOL=tcp + MQTT_PORT=1883
-      MQTT_PORT: 8883
-      MQTT_PROTOCOL: mqtts
-      MQTT_TOPIC: safelab/#
-      PORT: 8080
+      SPRING_PROFILES_ACTIVE: docker
+      # Edge JWT validation (ADR-006): must match backend-iam's signing secret.
+      JWT_SECRET: ${JWT_SECRET:-SafeLabSecretKeyForJwtTokenGeneration2026SecureKey32BytesLong!}
+    depends_on:
+      - safelab-backend-telemetry
+      - safelab-backend-alerts
+      - safelab-backend-labs
+      - safelab-backend-iam
+      - safelab-backend-compliance
+      - safelab-backend-automation
+      - safelab-backend-history
+      - safelab-backend-shared
+    networks:
+      - safelab-network
+
+networks:
+  safelab-network:
+    driver: bridge
 
 volumes:
-  safelab_mysql_data:
+  safelab-mysql-data:

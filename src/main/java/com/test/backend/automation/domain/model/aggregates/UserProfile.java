@@ -18,7 +18,7 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "user_profiles")
+@Table(name = "user_profiles", catalog = "safelab_automation")
 public class UserProfile extends AuditableAbstractAggregateRoot<UserProfile> {
 
     @ManyToOne

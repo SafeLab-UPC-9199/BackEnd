@@ -14,7 +14,7 @@ import lombok.AllArgsConstructor;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "lab_metric_subscriptions",
+@Table(name = "lab_metric_subscriptions", catalog = "safelab_labs",
        uniqueConstraints = @UniqueConstraint(columnNames = {"laboratory_id", "metric_type_id"}))
 public class LabMetricSubscription extends AuditableModel {
 

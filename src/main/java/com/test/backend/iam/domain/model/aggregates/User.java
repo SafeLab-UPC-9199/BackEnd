@@ -16,7 +16,7 @@ import java.util.Set;
 @Entity
 @Getter
 @Setter
-@Table(name = "users")
+@Table(name = "users", catalog = "safelab_iam")
 public class User extends AuditableAbstractAggregateRoot<User> {
 
     @NotBlank
@@ -44,6 +44,7 @@ public class User extends AuditableAbstractAggregateRoot<User> {
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
             name = "user_iam_roles",
+            catalog = "safelab_iam",
             joinColumns = @JoinColumn(name = "user_id"),
             inverseJoinColumns = @JoinColumn(name = "role_id")
     )

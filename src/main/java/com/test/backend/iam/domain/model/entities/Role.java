@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Set;
 
 @Entity(name = "IamRole")
-@Table(name = "iam_roles")
+@Table(name = "iam_roles", catalog = "safelab_iam")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

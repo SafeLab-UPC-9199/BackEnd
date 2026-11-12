@@ -105,6 +105,16 @@ public class PendingInvitationController {
                     return roleRepository.save(newRole);
                 });
 
+        // QAS-05: never trust client-provided laboratory ids - every lab must belong to
+        // the caller's workspace before it is stored in the invitation.
+        if (command.laboratoryIds() != null && !command.laboratoryIds().isEmpty()) {
+            for (Long labId : command.laboratoryIds()) {
+                if (laboratoryRepository.findByIdAndWorkspaceId(labId, workspaceId).isEmpty()) {
+                    return ResponseEntity.badRequest().build();
+                }
+            }
+        }
+
         var invitation = new PendingInvitation(command, role, workspaceId);
         pendingInvitationRepository.save(invitation);
 
@@ -154,7 +164,9 @@ public class PendingInvitationController {
         // Add laboratory access permissions
         if (invitation.getLaboratoryIds() != null && !invitation.getLaboratoryIds().isEmpty()) {
             for (Long labId : invitation.getLaboratoryIds()) {
-                laboratoryRepository.findById(labId).ifPresent(lab -> {
+                // QAS-05: labs are resolved within the invitation's own workspace only,
+                // so a crafted invitation can never grant access to a foreign laboratory.
+                laboratoryRepository.findByIdAndWorkspaceId(labId, invitation.getWorkspaceId()).ifPresent(lab -> {
                     // Check if already has access
                     boolean hasAccess = profile.getLabAccesses().stream()
                             .anyMatch(a -> a.getLaboratory().getId().equals(lab.getId()));

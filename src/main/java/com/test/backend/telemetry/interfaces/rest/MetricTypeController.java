@@ -11,6 +11,7 @@ import com.test.backend.telemetry.interfaces.rest.resources.UpdateMetricTypeReso
 import com.test.backend.telemetry.interfaces.rest.transform.CreateMetricTypeCommandFromResourceAssembler;
 import com.test.backend.telemetry.interfaces.rest.transform.MetricTypeResourceFromEntityAssembler;
 import com.test.backend.telemetry.interfaces.rest.transform.UpdateMetricTypeCommandFromResourceAssembler;
+import com.test.backend.shared.application.CurrentWorkspaceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.cache.annotation.CacheEvict;
@@ -28,11 +29,14 @@ public class MetricTypeController {
 
     private final MetricTypeCommandService metricTypeCommandService;
     private final MetricTypeQueryService metricTypeQueryService;
+    private final CurrentWorkspaceService currentWorkspaceService;
 
     public MetricTypeController(MetricTypeCommandService metricTypeCommandService,
-                                MetricTypeQueryService metricTypeQueryService) {
+                                MetricTypeQueryService metricTypeQueryService,
+                                CurrentWorkspaceService currentWorkspaceService) {
         this.metricTypeCommandService = metricTypeCommandService;
         this.metricTypeQueryService = metricTypeQueryService;
+        this.currentWorkspaceService = currentWorkspaceService;
     }
 
     @GetMapping
@@ -61,6 +65,10 @@ public class MetricTypeController {
     @CacheEvict(cacheNames = {"metricTypes", "activeMetricTypes"}, allEntries = true)
     @Operation(summary = "Create a new metric type")
     public ResponseEntity<MetricTypeResource> createMetricType(@RequestBody CreateMetricTypeResource resource) {
+        // QAS-05: global (cross-tenant) catalog - writes are Administrator only.
+        if (!currentWorkspaceService.isCurrentUserAdmin()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         var command = CreateMetricTypeCommandFromResourceAssembler.toCommandFromResource(resource);
         var result = metricTypeCommandService.handle(command);
         return result.map(mt -> new ResponseEntity<>(MetricTypeResourceFromEntityAssembler.toResourceFromEntity(mt), HttpStatus.CREATED))
@@ -71,6 +79,10 @@ public class MetricTypeController {
     @CacheEvict(cacheNames = {"metricTypes", "activeMetricTypes"}, allEntries = true)
     @Operation(summary = "Update an existing metric type")
     public ResponseEntity<MetricTypeResource> updateMetricType(@PathVariable Long id, @RequestBody UpdateMetricTypeResource resource) {
+        // QAS-05: global (cross-tenant) catalog - writes are Administrator only.
+        if (!currentWorkspaceService.isCurrentUserAdmin()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         var command = UpdateMetricTypeCommandFromResourceAssembler.toCommandFromResource(id, resource);
         var result = metricTypeCommandService.handle(command);
         return result.map(mt -> ResponseEntity.ok(MetricTypeResourceFromEntityAssembler.toResourceFromEntity(mt)))
@@ -81,6 +93,10 @@ public class MetricTypeController {
     @CacheEvict(cacheNames = {"metricTypes", "activeMetricTypes"}, allEntries = true)
     @Operation(summary = "Deactivate a metric type (soft delete)")
     public ResponseEntity<?> deleteMetricType(@PathVariable Long id) {
+        // QAS-05: global (cross-tenant) catalog - writes are Administrator only.
+        if (!currentWorkspaceService.isCurrentUserAdmin()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         try {
             metricTypeCommandService.handle(new DeleteMetricTypeCommand(id));
             return ResponseEntity.noContent().build();

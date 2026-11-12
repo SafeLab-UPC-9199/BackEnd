@@ -20,7 +20,7 @@ public class DuplicateIncidentPolicy {
         }
         return incidentRepository.existsByLaboratoryIdAndStatusIn(
                 laboratoryId,
-                List.of("OPEN", "ACKNOWLEDGED", "ESCALATED")
+                List.of("OPEN", "ACKNOWLEDGED", "IN_PROGRESS", "ESCALATED")
         );
     }
 }

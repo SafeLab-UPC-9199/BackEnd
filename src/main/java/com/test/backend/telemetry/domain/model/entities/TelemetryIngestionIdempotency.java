@@ -14,10 +14,13 @@ import java.time.LocalDateTime;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "telemetry_ingestion_idempotency", uniqueConstraints = {
+@Table(name = "telemetry_ingestion_idempotency", catalog = "safelab_telemetry", uniqueConstraints = {
         @UniqueConstraint(name = "uk_telemetry_idem_key", columnNames = {"idempotency_key"})
 })
 public class TelemetryIngestionIdempotency extends AuditableModel {
+
+    // id is inherited from AuditableModel (@Id + identity). Hibernate 7 forbids
+    // the subclass from respecifying the generation strategy.
 
     @Column(name = "idempotency_key", nullable = false, length = 128)
     private String idempotencyKey;

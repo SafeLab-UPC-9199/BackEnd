@@ -14,7 +14,7 @@ import lombok.AllArgsConstructor;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "metric_types")
+@Table(name = "metric_types", catalog = "safelab_telemetry")
 public class MetricType extends AuditableAbstractAggregateRoot<MetricType> {
 
     @Column(name = "metric_key", unique = true, nullable = false)

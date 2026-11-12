@@ -37,11 +37,11 @@ class DuplicateIncidentPolicyTest {
 
         // Assert
         assertFalse(result);
-        verify(incidentRepository).existsByLaboratoryIdAndStatusIn(labId, List.of("OPEN", "ACKNOWLEDGED", "ESCALATED"));
+        verify(incidentRepository).existsByLaboratoryIdAndStatusIn(labId, List.of("OPEN", "ACKNOWLEDGED", "IN_PROGRESS", "ESCALATED"));
     }
 
     @Test
-    @DisplayName("Returns true when an active incident is currently open or escalated")
+    @DisplayName("Returns true when an active incident is currently open, acknowledged, in progress or escalated")
     void shouldReturnTrueWhenActiveIncidentExists() {
         // Arrange
         Long labId = 2L;
@@ -52,7 +52,7 @@ class DuplicateIncidentPolicyTest {
 
         // Assert
         assertTrue(result);
-        verify(incidentRepository).existsByLaboratoryIdAndStatusIn(labId, List.of("OPEN", "ACKNOWLEDGED", "ESCALATED"));
+        verify(incidentRepository).existsByLaboratoryIdAndStatusIn(labId, List.of("OPEN", "ACKNOWLEDGED", "IN_PROGRESS", "ESCALATED"));
     }
 
     @Test

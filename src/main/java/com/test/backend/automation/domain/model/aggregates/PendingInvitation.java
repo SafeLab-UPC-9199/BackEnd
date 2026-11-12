@@ -17,7 +17,7 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "pending_invitations")
+@Table(name = "pending_invitations", catalog = "safelab_automation")
 public class PendingInvitation extends AuditableAbstractAggregateRoot<PendingInvitation> {
 
     @Column(nullable = false)

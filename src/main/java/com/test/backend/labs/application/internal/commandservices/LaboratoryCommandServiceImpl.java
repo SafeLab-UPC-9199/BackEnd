@@ -141,31 +141,31 @@ public class LaboratoryCommandServiceImpl implements LaboratoryCommandService {
 
         // 1. Delete calibration records for sensors in this laboratory
         entityManager.createNativeQuery(
-            "DELETE FROM calibration_records WHERE sensor_configuration_id IN (SELECT id FROM sensor_configurations WHERE laboratory_id = ?1)"
+            "DELETE FROM safelab_automation.calibration_records WHERE sensor_configuration_id IN (SELECT id FROM safelab_automation.sensor_configurations WHERE laboratory_id = ?1)"
         ).setParameter(1, labId).executeUpdate();
 
         // 2. Delete sensor readings for this laboratory
         entityManager.createNativeQuery(
-            "DELETE FROM sensor_readings WHERE laboratory_id = ?1"
+            "DELETE FROM safelab_telemetry.sensor_readings WHERE laboratory_id = ?1"
         ).setParameter(1, labId).executeUpdate();
 
         // 3. Delete sensor configurations for this laboratory
         entityManager.createNativeQuery(
-            "DELETE FROM sensor_configurations WHERE laboratory_id = ?1"
+            "DELETE FROM safelab_automation.sensor_configurations WHERE laboratory_id = ?1"
         ).setParameter(1, labId).executeUpdate();
 
         // 4. Delete alerts for this laboratory (and alert metrics)
         entityManager.createNativeQuery(
-            "DELETE FROM alert_metrics WHERE alert_id IN (SELECT id FROM alerts WHERE laboratory_id = ?1)"
+            "DELETE FROM safelab_alerts.alert_metrics WHERE alert_id IN (SELECT id FROM safelab_alerts.alerts WHERE laboratory_id = ?1)"
         ).setParameter(1, labId).executeUpdate();
 
         entityManager.createNativeQuery(
-            "DELETE FROM alerts WHERE laboratory_id = ?1"
+            "DELETE FROM safelab_alerts.alerts WHERE laboratory_id = ?1"
         ).setParameter(1, labId).executeUpdate();
 
         // 5. Delete lab user accesses for this laboratory
         entityManager.createNativeQuery(
-            "DELETE FROM lab_user_accesses WHERE laboratory_id = ?1"
+            "DELETE FROM safelab_automation.lab_user_accesses WHERE laboratory_id = ?1"
         ).setParameter(1, labId).executeUpdate();
 
         // 6. Delete laboratory

@@ -32,6 +32,7 @@ import com.test.backend.iam.domain.services.UserQueryService;
 import com.test.backend.iam.infrastructure.persistence.jpa.repositories.UserRepository;
 import com.test.backend.labs.domain.model.aggregates.Workspace;
 import com.test.backend.labs.infrastructure.persistence.jpa.repositories.WorkspaceRepository;
+import com.test.backend.shared.infrastructure.persistence.BoundedContextCatalogs;
 import jakarta.persistence.EntityManager;
 
 import org.slf4j.Logger;
@@ -1827,7 +1828,8 @@ public class TemporarySeeder implements CommandLineRunner {
 
     private void saveMaxIdSetting(String settingKey, String tableName) {
         try {
-            Object result = entityManager.createNativeQuery("SELECT MAX(id) FROM " + tableName).getSingleResult();
+            Object result = entityManager.createNativeQuery(
+                    "SELECT MAX(id) FROM " + BoundedContextCatalogs.qualify(tableName)).getSingleResult();
             String val = result != null ? result.toString() : "0";
             generalSettingRepository.findBySettingKey(settingKey)
                 .ifPresentOrElse(

@@ -13,7 +13,7 @@ import lombok.AllArgsConstructor;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "history_records")
+@Table(name = "history_records", catalog = "safelab_history")
 public class HistoryRecord extends AuditableAbstractAggregateRoot<HistoryRecord> {
     @ManyToOne
     @JoinColumn(name = "laboratory_id", nullable = true)

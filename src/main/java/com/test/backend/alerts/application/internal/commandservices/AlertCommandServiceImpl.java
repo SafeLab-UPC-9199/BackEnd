@@ -1,9 +1,7 @@
 package com.test.backend.alerts.application.internal.commandservices;
 
 import com.test.backend.alerts.domain.model.aggregates.Alert;
-import com.test.backend.alerts.domain.model.commands.CreateAlertCommand;
-import com.test.backend.alerts.domain.model.commands.UpdateAlertCommand;
-import com.test.backend.alerts.domain.model.commands.DeleteAlertCommand;
+import com.test.backend.alerts.domain.model.commands.*;
 import com.test.backend.alerts.domain.services.AlertCommandService;
 import com.test.backend.alerts.infrastructure.persistence.jpa.repositories.AlertRepository;
 import com.test.backend.compliance.domain.model.aggregates.AuditTrail;
@@ -142,6 +140,130 @@ public class AlertCommandServiceImpl implements AlertCommandService {
             historyRecordRepository.save(record);
         }
 
+        return Optional.of(alert);
+    }
+
+    @Override
+    @Transactional
+    public Optional<Alert> handle(AcknowledgeAlertCommand command) {
+        Long workspaceId = currentWorkspaceService.getCurrentWorkspaceId()
+                .orElseThrow(() -> new IllegalStateException("User does not have an active workspace"));
+
+        var alertOpt = alertRepository.findByIdAndLaboratoryWorkspaceId(command.alertId(), workspaceId);
+        if (alertOpt.isEmpty()) return Optional.empty();
+
+        var alert = alertOpt.get();
+        String previousStatus = alert.getStatus();
+        alert.acknowledge();
+        alertRepository.save(alert);
+
+        var actor = currentWorkspaceService.getCurrentUserEmail().orElse("system-automation");
+        var audit = new AuditTrail(
+                String.valueOf(alert.getId()),
+                "ACKNOWLEDGE_ALERT",
+                actor,
+                previousStatus,
+                "ACKNOWLEDGED",
+                "Alert acknowledged by " + actor,
+                calculateHash(alert.getId(), "ACKNOWLEDGE_ALERT", actor, previousStatus, "ACKNOWLEDGED")
+        );
+        auditTrailRepository.save(audit);
+        return Optional.of(alert);
+    }
+
+    @Override
+    @Transactional
+    public Optional<Alert> handle(AttendAlertCommand command) {
+        Long workspaceId = currentWorkspaceService.getCurrentWorkspaceId()
+                .orElseThrow(() -> new IllegalStateException("User does not have an active workspace"));
+
+        var alertOpt = alertRepository.findByIdAndLaboratoryWorkspaceId(command.alertId(), workspaceId);
+        if (alertOpt.isEmpty()) return Optional.empty();
+
+        var alert = alertOpt.get();
+        String previousStatus = alert.getStatus();
+        alert.attend();
+        alertRepository.save(alert);
+
+        var actor = currentWorkspaceService.getCurrentUserEmail().orElse("system-automation");
+        var audit = new AuditTrail(
+                String.valueOf(alert.getId()),
+                "ATTEND_ALERT",
+                actor,
+                previousStatus,
+                "IN_PROGRESS",
+                "Alert attention started by " + actor,
+                calculateHash(alert.getId(), "ATTEND_ALERT", actor, previousStatus, "IN_PROGRESS")
+        );
+        auditTrailRepository.save(audit);
+        return Optional.of(alert);
+    }
+
+    @Override
+    @Transactional
+    public Optional<Alert> handle(ResolveAlertCommand command) {
+        Long workspaceId = currentWorkspaceService.getCurrentWorkspaceId()
+                .orElseThrow(() -> new IllegalStateException("User does not have an active workspace"));
+
+        var alertOpt = alertRepository.findByIdAndLaboratoryWorkspaceId(command.alertId(), workspaceId);
+        if (alertOpt.isEmpty()) return Optional.empty();
+
+        var alert = alertOpt.get();
+        String previousStatus = alert.getStatus();
+        alert.resolve();
+        alertRepository.save(alert);
+
+        var actor = currentWorkspaceService.getCurrentUserEmail().orElse("system-automation");
+        var audit = new AuditTrail(
+                String.valueOf(alert.getId()),
+                "RESOLVE_ALERT",
+                actor,
+                previousStatus,
+                "RESOLVED",
+                "Alert resolved by " + actor,
+                calculateHash(alert.getId(), "RESOLVE_ALERT", actor, previousStatus, "RESOLVED")
+        );
+        auditTrailRepository.save(audit);
+
+        var laboratory = alert.getLaboratory();
+        if (laboratory != null) {
+            boolean hasOtherActiveAlerts = alertRepository.findByLaboratoryId(laboratory.getId()).stream()
+                    .anyMatch(a -> !"RESOLVED".equalsIgnoreCase(a.getStatus()) && !"CLOSED".equalsIgnoreCase(a.getStatus()) && !a.getId().equals(alert.getId()));
+            if (!hasOtherActiveAlerts) {
+                laboratory.setOverallStatus("OPERATIONAL");
+                laboratory.setStatus("Operational");
+                laboratoryRepository.save(laboratory);
+            }
+        }
+
+        return Optional.of(alert);
+    }
+
+    @Override
+    @Transactional
+    public Optional<Alert> handle(CloseAlertCommand command) {
+        Long workspaceId = currentWorkspaceService.getCurrentWorkspaceId()
+                .orElseThrow(() -> new IllegalStateException("User does not have an active workspace"));
+
+        var alertOpt = alertRepository.findByIdAndLaboratoryWorkspaceId(command.alertId(), workspaceId);
+        if (alertOpt.isEmpty()) return Optional.empty();
+
+        var alert = alertOpt.get();
+        String previousStatus = alert.getStatus();
+        alert.close();
+        alertRepository.save(alert);
+
+        var actor = currentWorkspaceService.getCurrentUserEmail().orElse("system-automation");
+        var audit = new AuditTrail(
+                String.valueOf(alert.getId()),
+                "CLOSE_ALERT",
+                actor,
+                previousStatus,
+                "CLOSED",
+                "Alert formally closed by " + actor,
+                calculateHash(alert.getId(), "CLOSE_ALERT", actor, previousStatus, "CLOSED")
+        );
+        auditTrailRepository.save(audit);
         return Optional.of(alert);
     }
 
