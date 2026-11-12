@@ -24,8 +24,8 @@ public class IncidentResourceFromEntityAssembler {
 
         return new IncidentResource(
                 entity.getId(),
-                entity.getLaboratoryId(),
-                null,  // labName - resolved by labs service in future
+                entity.getLaboratory() != null ? entity.getLaboratory().getId() : null,
+                entity.getLaboratory() != null ? entity.getLaboratory().getName() : null,
                 entity.getTitle(),
                 entity.getDescription(),
                 entity.getSeverity(),

@@ -1,6 +1,7 @@
 package com.test.backend.alerts.domain.model.aggregates;
 
 import com.test.backend.alerts.domain.model.entities.CorrectiveAction;
+import com.test.backend.labs.domain.model.aggregates.Laboratory;
 import com.test.backend.shared.domain.model.aggregates.AuditableAbstractAggregateRoot;
 import jakarta.persistence.*;
 import lombok.Getter;
@@ -18,14 +19,9 @@ import java.time.LocalDateTime;
 @Table(name = "incidents", catalog = "safelab_alerts")
 public class Incident extends AuditableAbstractAggregateRoot<Incident> {
 
-    @Column(name = "laboratory_id", nullable = false)
-    private Long laboratoryId;
-
-    // Denormalized workspace of the laboratory (flat column): the alerts catalog
-    // has no Laboratory entity anymore, so QAS-05 tenant queries
-    // (findByLaboratoryWorkspaceId...) filter against this column.
-    @Column(name = "laboratory_workspace_id")
-    private Long laboratoryWorkspaceId;
+    @ManyToOne
+    @JoinColumn(name = "laboratory_id", nullable = false)
+    private Laboratory laboratory;
 
     @Column(name = "title")
     private String title;
@@ -53,8 +49,8 @@ public class Incident extends AuditableAbstractAggregateRoot<Incident> {
     @OneToOne(mappedBy = "incident", cascade = CascadeType.ALL)
     private CorrectiveAction correctiveAction;
 
-    public Incident(Long laboratoryId, String title, String description, String severity, Integer escalationMaxMins, String escalationNextRole) {
-        this.laboratoryId = laboratoryId;
+    public Incident(Laboratory laboratory, String title, String description, String severity, Integer escalationMaxMins, String escalationNextRole) {
+        this.laboratory = laboratory;
         this.title = title;
         this.description = description;
         this.severity = severity != null ? severity : "CRITICAL";
@@ -65,15 +61,22 @@ public class Incident extends AuditableAbstractAggregateRoot<Incident> {
     }
 
     public void acknowledge() {
-        if ("RESOLVED".equalsIgnoreCase(this.status)) {
-            throw new IllegalStateException("Cannot acknowledge an already resolved incident");
+        if ("RESOLVED".equalsIgnoreCase(this.status) || "CLOSED".equalsIgnoreCase(this.status)) {
+            throw new IllegalStateException("Cannot acknowledge an already resolved or closed incident");
         }
         this.status = "ACKNOWLEDGED";
     }
 
+    public void attend() {
+        if ("RESOLVED".equalsIgnoreCase(this.status) || "CLOSED".equalsIgnoreCase(this.status)) {
+            throw new IllegalStateException("Cannot attend an already resolved or closed incident");
+        }
+        this.status = "IN_PROGRESS";
+    }
+
     public void resolve(CorrectiveAction action) {
-        if ("RESOLVED".equalsIgnoreCase(this.status)) {
-            throw new IllegalStateException("Incident is already resolved");
+        if ("RESOLVED".equalsIgnoreCase(this.status) || "CLOSED".equalsIgnoreCase(this.status)) {
+            throw new IllegalStateException("Incident is already resolved or closed");
         }
         this.status = "RESOLVED";
         this.resolvedAt = LocalDateTime.now();
@@ -81,9 +84,16 @@ public class Incident extends AuditableAbstractAggregateRoot<Incident> {
         action.setIncident(this);
     }
 
+    public void close() {
+        if (!"RESOLVED".equalsIgnoreCase(this.status)) {
+            throw new IllegalStateException("Cannot close an un-resolved incident. Resolve with corrective action first.");
+        }
+        this.status = "CLOSED";
+    }
+
     public void escalate(String nextRole) {
-        if ("RESOLVED".equalsIgnoreCase(this.status)) {
-            throw new IllegalStateException("Cannot escalate a resolved incident");
+        if ("RESOLVED".equalsIgnoreCase(this.status) || "CLOSED".equalsIgnoreCase(this.status)) {
+            throw new IllegalStateException("Cannot escalate a resolved or closed incident");
         }
         this.status = "ESCALATED";
         if (nextRole != null && !nextRole.isBlank()) {

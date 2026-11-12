@@ -65,4 +65,32 @@ public class Alert extends AuditableAbstractAggregateRoot<Alert> {
         this.timeAgo = command.timeAgo();
         return this;
     }
+
+    public void acknowledge() {
+        if ("RESOLVED".equalsIgnoreCase(this.status) || "CLOSED".equalsIgnoreCase(this.status)) {
+            throw new IllegalStateException("Cannot acknowledge an already resolved or closed alert");
+        }
+        this.status = "ACKNOWLEDGED";
+    }
+
+    public void attend() {
+        if ("RESOLVED".equalsIgnoreCase(this.status) || "CLOSED".equalsIgnoreCase(this.status)) {
+            throw new IllegalStateException("Cannot attend an already resolved or closed alert");
+        }
+        this.status = "IN_PROGRESS";
+    }
+
+    public void resolve() {
+        if ("CLOSED".equalsIgnoreCase(this.status)) {
+            throw new IllegalStateException("Alert is already closed");
+        }
+        this.status = "RESOLVED";
+    }
+
+    public void close() {
+        if (!"RESOLVED".equalsIgnoreCase(this.status)) {
+            throw new IllegalStateException("Cannot close an un-resolved alert. Resolve first.");
+        }
+        this.status = "CLOSED";
+    }
 }

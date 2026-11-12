@@ -12,7 +12,7 @@ public record AlertResource(
     Long laboratoryId,
     String labName,
     String labLocation,
-    String sensorId,
+    Long sensorId,
     String sensorName,
     String equipmentName,
     List<AlertMetricResource> metrics

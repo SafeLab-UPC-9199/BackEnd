@@ -2,6 +2,8 @@ package com.test.backend.alerts.interfaces.rest;
 
 import com.test.backend.alerts.domain.model.commands.AcknowledgeIncidentCommand;
 import com.test.backend.alerts.domain.model.commands.ApplyEscalationCommand;
+import com.test.backend.alerts.domain.model.commands.AttendIncidentCommand;
+import com.test.backend.alerts.domain.model.commands.CloseIncidentCommand;
 import com.test.backend.alerts.domain.model.commands.ResolveIncidentCommand;
 import com.test.backend.alerts.domain.model.queries.GetIncidentByIdQuery;
 import com.test.backend.alerts.domain.model.queries.GetIncidentsQuery;
@@ -98,6 +100,42 @@ public class IncidentController {
         var result = incidentCommandService.handle(command);
         return result.map(incident -> ResponseEntity.ok(IncidentResourceFromEntityAssembler.toResourceFromEntity(incident)))
                 .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @PostMapping("/{id}/attend")
+    @Operation(summary = "Attend incident", description = "Transitions incident state to IN_PROGRESS indicating technical response is underway")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Incident transitioned to IN_PROGRESS successfully"),
+            @ApiResponse(responseCode = "400", description = "Illegal state transition attempted"),
+            @ApiResponse(responseCode = "404", description = "Incident not found")
+    })
+    public ResponseEntity<?> attendIncident(@PathVariable Long id) {
+        try {
+            var command = new AttendIncidentCommand(id);
+            var result = incidentCommandService.handle(command);
+            return result.map(incident -> ResponseEntity.ok(IncidentResourceFromEntityAssembler.toResourceFromEntity(incident)))
+                    .orElseGet(() -> ResponseEntity.notFound().build());
+        } catch (IllegalStateException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostMapping("/{id}/close")
+    @Operation(summary = "Close incident", description = "Formally closes an incident that has already been resolved")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Incident closed successfully"),
+            @ApiResponse(responseCode = "400", description = "Incident must be resolved before it can be closed"),
+            @ApiResponse(responseCode = "404", description = "Incident not found")
+    })
+    public ResponseEntity<?> closeIncident(@PathVariable Long id) {
+        try {
+            var command = new CloseIncidentCommand(id);
+            var result = incidentCommandService.handle(command);
+            return result.map(incident -> ResponseEntity.ok(IncidentResourceFromEntityAssembler.toResourceFromEntity(incident)))
+                    .orElseGet(() -> ResponseEntity.notFound().build());
+        } catch (IllegalStateException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
     }
 
     @PostMapping("/{id}/resolve")

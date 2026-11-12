@@ -1,9 +1,9 @@
 package com.test.backend.alerts.interfaces.rest;
 
 import com.test.backend.alerts.application.internal.eventhandlers.OutboxEventPublishedHandler;
-import com.test.backend.shared.domain.model.entities.SharedEventOutbox;
+import com.test.backend.shared.application.CurrentWorkspaceService;
 import com.test.backend.shared.infrastructure.persistence.jpa.repositories.SharedEventOutboxRepository;
-import com.test.backend.shared.infrastructure.security.RequestIdentity;
+import com.test.backend.shared.domain.model.entities.SharedEventOutbox;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,12 +19,11 @@ import java.util.stream.Collectors;
 
 /**
  * Read/ops endpoints over the shared transactional outbox, including DLQ
- * replay for FAILED events.
+ * replay for FAILED events. Secured by the global authenticated rule.
  *
- * <p>QAS-05 (mirrors the monolith): listing endpoints are filtered by the
- * caller's workspace (organizationId) unless the caller is an Administrator,
- * and the DLQ replay endpoints are Administrator-only. Identity comes from
- * the gateway headers read by {@link RequestIdentity} (ADR-006).</p>
+ * <p>QAS-05: listing endpoints are filtered by the caller's workspace
+ * (organizationId) unless the caller is an Administrator, and the DLQ replay
+ * endpoints are Administrator-only.</p>
  */
 @RestController
 @RequestMapping("/api/v1/alerts/outbox")
@@ -32,11 +31,14 @@ public class OutboxAdminController {
 
     private final SharedEventOutboxRepository sharedEventOutboxRepository;
     private final OutboxEventPublishedHandler outboxEventPublishedHandler;
+    private final CurrentWorkspaceService currentWorkspaceService;
 
     public OutboxAdminController(SharedEventOutboxRepository sharedEventOutboxRepository,
-                                 OutboxEventPublishedHandler outboxEventPublishedHandler) {
+                                 OutboxEventPublishedHandler outboxEventPublishedHandler,
+                                 CurrentWorkspaceService currentWorkspaceService) {
         this.sharedEventOutboxRepository = sharedEventOutboxRepository;
         this.outboxEventPublishedHandler = outboxEventPublishedHandler;
+        this.currentWorkspaceService = currentWorkspaceService;
     }
 
     @GetMapping("/failed")
@@ -79,10 +81,13 @@ public class OutboxAdminController {
                 "deliveredSinceStartup", outboxEventPublishedHandler.getDeliveredCount()));
     }
 
+    /**
+     * DLQ replay: moves one FAILED event back to PENDING (retry counter and
+     * last error are reset) so the dispatcher attempts delivery again.
+     */
     @PostMapping("/failed/{id}/retry")
     public ResponseEntity<Map<String, Object>> retryFailed(@PathVariable Long id) {
-        // QAS-05: DLQ replay mutates shared state - Administrator only.
-        if (!RequestIdentity.isAdmin()) {
+        if (!currentWorkspaceService.isCurrentUserAdmin()) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
         int requeued = sharedEventOutboxRepository.requeueFailedById(id);
@@ -92,10 +97,10 @@ public class OutboxAdminController {
         return ResponseEntity.accepted().body(Map.of("status", "REQUEUED", "id", id));
     }
 
+    /** DLQ replay-all: re-queues every FAILED event in one operation. */
     @PostMapping("/failed/retry-all")
     public ResponseEntity<Map<String, Object>> retryAllFailed() {
-        // QAS-05: DLQ replay mutates shared state - Administrator only.
-        if (!RequestIdentity.isAdmin()) {
+        if (!currentWorkspaceService.isCurrentUserAdmin()) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
         int requeued = sharedEventOutboxRepository.requeueAllFailed();
@@ -104,15 +109,15 @@ public class OutboxAdminController {
 
     /** True when the caller may read outbox entries (admin = global, otherwise workspace-filtered). */
     private boolean canManageOutbox() {
-        return RequestIdentity.isAdmin() || RequestIdentity.currentWorkspaceId().isPresent();
+        return currentWorkspaceService.isCurrentUserAdmin() || currentWorkspaceService.getCurrentWorkspaceId().isPresent();
     }
 
     /** QAS-05 filter: non-administrators only see events of their own workspace. */
     private boolean visibleToCaller(SharedEventOutbox event) {
-        if (RequestIdentity.isAdmin()) {
+        if (currentWorkspaceService.isCurrentUserAdmin()) {
             return true;
         }
-        var workspaceIdOpt = RequestIdentity.currentWorkspaceId();
+        var workspaceIdOpt = currentWorkspaceService.getCurrentWorkspaceId();
         if (workspaceIdOpt.isEmpty()) {
             return false;
         }
