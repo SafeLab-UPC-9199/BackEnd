@@ -5,6 +5,18 @@ import com.test.backend.iam.interfaces.rest.resources.SignInResource;
 
 public class SignInCommandFromResourceAssembler {
     public static SignInCommand toCommandFromResource(SignInResource resource) {
-        return new SignInCommand(resource.email(), resource.password());
+        return new SignInCommand(resource.email(), resource.password(), resource.totpCode(), resource.backupCode());
+    }
+
+    public static SignInCommand toCommandFromResource(SignInResource resource, String ipAddress, String userAgent, String location) {
+        return new SignInCommand(
+                resource.email(),
+                resource.password(),
+                resource.totpCode(),
+                resource.backupCode(),
+                ipAddress,
+                userAgent,
+                location
+        );
     }
 }

@@ -85,6 +85,22 @@ class SharedEventOutboxDispatcherFilterTest {
         assertEquals(1, reading.getRetryCount());
     }
 
+    @Test
+    @DisplayName("soporta patrones de prefijo security.* y security.# sin capturar TemperatureReadingRecorded")
+    void dispatchesSecurityPrefixMatchesWithoutTouchingOtherTypes() {
+        ReflectionTestUtils.setField(dispatcher, "dispatchEventTypes", "security.*");
+        var login = outbox("security.login.succeeded");
+        var reading = outbox("TemperatureReadingRecorded");
+        when(repository.findByStatus("PENDING")).thenReturn(List.of(login, reading));
+
+        dispatcher.dispatchPendingEvents();
+
+        verify(publisher, times(1)).publishEvent(login);
+        verify(publisher, never()).publishEvent(reading);
+        assertEquals("PUBLISHED", login.getStatus());
+        assertEquals("PENDING", reading.getStatus());
+    }
+
     private SharedEventOutbox outbox(String eventType) {
         return new SharedEventOutbox(eventType, "SensorReading", "1", "{}", null);
     }

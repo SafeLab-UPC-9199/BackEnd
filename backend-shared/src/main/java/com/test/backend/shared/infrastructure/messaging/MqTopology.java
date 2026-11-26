@@ -34,6 +34,14 @@ public final class MqTopology {
     /** Value of {@code SharedEventOutbox.eventType} for this event (ADR-002). */
     public static final String TEMPERATURE_READING_EVENT_TYPE = "TemperatureReadingRecorded";
 
+    public static final String SECURITY_ROUTING_PATTERN = "security.#";
+    public static final String SECURITY_AUDIT_QUEUE = "compliance.security.audit";
+    public static final String SECURITY_AUDIT_DLQ = "compliance.security.audit.dlq";
+    public static final String SECURITY_LOGIN_SUCCEEDED_EVENT = "security.login.succeeded";
+    public static final String SECURITY_LOGIN_FAILED_EVENT = "security.login.failed";
+    public static final String SECURITY_2FA_FAILED_EVENT = "security.2fa.failed";
+    public static final String SECURITY_SESSION_REVOKED_EVENT = "security.session.revoked";
+
     /** Queue argument routing a rejected message to the dead-letter exchange. */
     public static final String DLX_ARGUMENT = "x-dead-letter-exchange";
 

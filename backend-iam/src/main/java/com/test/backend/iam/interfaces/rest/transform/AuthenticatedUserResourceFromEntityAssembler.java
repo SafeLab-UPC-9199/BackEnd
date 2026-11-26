@@ -16,7 +16,12 @@ public class AuthenticatedUserResourceFromEntityAssembler {
                 entity.user().getId(),
                 entity.user().getEmail(),
                 entity.token(),
-                roles
+                roles,
+                entity.workspaceId(),
+                entity.twoFactorRequired(),
+                entity.atRisk(),
+                entity.passwordExpired(),
+                entity.securityStatus()
         );
     }
 }

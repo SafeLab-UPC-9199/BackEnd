@@ -76,4 +76,18 @@ class TokenServiceImplTest {
 
         assertFalse(service.validateToken(forged));
     }
+
+    @Test
+    void tokenCarriesIssuerSessionIdAndShortLivedMinutes() {
+        ReflectionTestUtils.setField(service, "expirationMinutes", 60L);
+        var token = service.generateToken("admin@safelab.com", List.of("ROLE_ADMIN"), 1L, "sess-123");
+        var claims = parse(token).getPayload();
+
+        assertEquals(TokenServiceImpl.ISSUER, claims.getIssuer());
+        assertEquals("sess-123", claims.getId());
+        assertEquals("sess-123", claims.get("sessionId", String.class));
+        assertEquals("sess-123", service.getSessionIdFromToken(token));
+        long ttlMinutes = (claims.getExpiration().getTime() - claims.getIssuedAt().getTime()) / 60_000L;
+        assertEquals(60L, ttlMinutes);
+    }
 }

@@ -64,8 +64,19 @@ public class SharedEventOutboxDispatcher {
         if (dispatchEventTypes == null || dispatchEventTypes.isBlank()) {
             return true;
         }
+        if (eventType == null) {
+            return false;
+        }
         for (String owned : dispatchEventTypes.split(",")) {
-            if (eventType != null && eventType.equals(owned.trim())) {
+            String pattern = owned.trim();
+            if (pattern.isEmpty()) {
+                continue;
+            }
+            if ((pattern.endsWith(".*") || pattern.endsWith(".#"))
+                    && eventType.startsWith(pattern.substring(0, pattern.length() - 1))) {
+                return true;
+            }
+            if (eventType.equals(pattern)) {
                 return true;
             }
         }

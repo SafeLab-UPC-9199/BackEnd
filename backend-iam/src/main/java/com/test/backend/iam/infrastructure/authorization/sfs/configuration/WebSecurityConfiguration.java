@@ -70,6 +70,7 @@ public class WebSecurityConfiguration {
                                 "/api/v1/authentication/sign-up",
                                 "/api/v1/authentication/confirm-account",
                                 "/api/v1/authentication/resend-code",
+                                "/api/v1/security/sessions/*/active",
                                 "/api/v1/system/status",
                                 "/api/v1/telemetry/ingestion",
                                 "/v3/api-docs/**",

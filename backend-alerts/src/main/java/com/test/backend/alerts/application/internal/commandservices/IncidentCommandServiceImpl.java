@@ -1,321 +1,112 @@
 package com.test.backend.alerts.application.internal.commandservices;
 
 import com.test.backend.alerts.domain.model.aggregates.Incident;
-import com.test.backend.alerts.domain.model.commands.AcknowledgeIncidentCommand;
-import com.test.backend.alerts.domain.model.commands.ApplyEscalationCommand;
-import com.test.backend.alerts.domain.model.commands.AttendIncidentCommand;
-import com.test.backend.alerts.domain.model.commands.CloseIncidentCommand;
-import com.test.backend.alerts.domain.model.commands.CreateIncidentCommand;
-import com.test.backend.alerts.domain.model.commands.ResolveIncidentCommand;
+import com.test.backend.alerts.domain.model.commands.*;
 import com.test.backend.alerts.domain.model.entities.CorrectiveAction;
 import com.test.backend.alerts.domain.services.DuplicateIncidentPolicy;
 import com.test.backend.alerts.domain.services.IncidentCommandService;
 import com.test.backend.alerts.infrastructure.persistence.jpa.repositories.IncidentRepository;
 import com.test.backend.alerts.infrastructure.security.JWTSecurityContextAdapter;
-import com.test.backend.compliance.domain.model.aggregates.AuditTrail;
-import com.test.backend.compliance.infrastructure.persistence.jpa.repositories.AuditTrailRepository;
-import com.test.backend.labs.infrastructure.persistence.jpa.repositories.LaboratoryRepository;
 import com.test.backend.shared.domain.model.entities.SharedEventOutbox;
 import com.test.backend.shared.infrastructure.persistence.jpa.repositories.SharedEventOutboxRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.util.HexFormat;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 @Service
 @Transactional
 public class IncidentCommandServiceImpl implements IncidentCommandService {
 
     private final IncidentRepository incidentRepository;
-    private final LaboratoryRepository laboratoryRepository;
     private final SharedEventOutboxRepository eventOutboxRepository;
-    private final AuditTrailRepository auditTrailRepository;
     private final DuplicateIncidentPolicy duplicateIncidentPolicy;
     private final JWTSecurityContextAdapter jwtSecurityContextAdapter;
 
     public IncidentCommandServiceImpl(
             IncidentRepository incidentRepository,
-            LaboratoryRepository laboratoryRepository,
             SharedEventOutboxRepository eventOutboxRepository,
-            AuditTrailRepository auditTrailRepository,
             DuplicateIncidentPolicy duplicateIncidentPolicy,
             JWTSecurityContextAdapter jwtSecurityContextAdapter
     ) {
         this.incidentRepository = incidentRepository;
-        this.laboratoryRepository = laboratoryRepository;
         this.eventOutboxRepository = eventOutboxRepository;
-        this.auditTrailRepository = auditTrailRepository;
         this.duplicateIncidentPolicy = duplicateIncidentPolicy;
         this.jwtSecurityContextAdapter = jwtSecurityContextAdapter;
     }
 
     @Override
     public Optional<Incident> handle(CreateIncidentCommand command) {
-        // QAS-05: the workspace-validated laboratory lookup runs FIRST, so the duplicate
-        // check below cannot be used as an oracle to probe active incidents of other
-        // tenants' laboratories (409 only for labs the caller can actually access).
-        var workspaceIdOpt = jwtSecurityContextAdapter.getCurrentWorkspaceId();
-        var laboratoryOpt = (workspaceIdOpt.isPresent() && !jwtSecurityContextAdapter.isCurrentUserAdmin())
-                ? laboratoryRepository.findByIdAndWorkspaceId(command.laboratoryId(), workspaceIdOpt.get())
-                : laboratoryRepository.findById(command.laboratoryId());
-
-        if (laboratoryOpt.isEmpty()) {
-            throw new IllegalArgumentException("Laboratory not found or access denied for ID " + command.laboratoryId());
+        if (command.laboratoryId() == null) {
+            throw new IllegalArgumentException("Laboratory ID is required");
         }
-
         if (duplicateIncidentPolicy.hasActiveIncident(command.laboratoryId())) {
             throw new IllegalStateException("An active incident already exists for laboratory ID " + command.laboratoryId());
         }
 
-        var laboratory = laboratoryOpt.get();
         var incident = new Incident(
-                laboratory,
+                command.laboratoryId(),
                 command.title(),
                 command.description(),
                 command.severity(),
                 command.escalationMaxMins(),
                 command.escalationNextRole()
         );
+        jwtSecurityContextAdapter.getCurrentWorkspaceId().ifPresent(incident::setLaboratoryWorkspaceId);
 
-        var savedIncident = incidentRepository.save(incident);
-
-        // Correlation id ties every event/effect of this business transaction together.
-        var correlationId = UUID.randomUUID().toString();
-        var outbox = new SharedEventOutbox(
-                "INCIDENT_CREATED",
-                "Incident",
-                String.valueOf(savedIncident.getId()),
-                "{\"incidentId\":" + savedIncident.getId() + ",\"laboratoryId\":" + laboratory.getId() + ",\"severity\":\"" + savedIncident.getSeverity() + "\"}",
-                laboratory.getWorkspace() != null ? String.valueOf(laboratory.getWorkspace().getId()) : null,
-                correlationId,
-                SharedEventOutbox.DEFAULT_SCHEMA_VERSION
-        );
-        eventOutboxRepository.save(outbox);
-
-        var actor = jwtSecurityContextAdapter.getCurrentActor();
-        var signature = calculateHash(savedIncident.getId(), "CREATE_INCIDENT", actor, null, "OPEN");
-        var audit = new AuditTrail(
-                String.valueOf(savedIncident.getId()),
-                "CREATE_INCIDENT",
-                actor,
-                null,
-                "OPEN",
-                "Incident opened for laboratory " + laboratory.getName() + " with severity " + savedIncident.getSeverity(),
-                signature
-        );
-        auditTrailRepository.save(audit);
-
-        return Optional.of(savedIncident);
+        var saved = incidentRepository.save(incident);
+        publishOutbox(saved, "INCIDENT_CREATED",
+                "{\"incidentId\":" + saved.getId() + ",\"laboratoryId\":" + saved.getLaboratoryId()
+                        + ",\"severity\":\"" + saved.getSeverity() + "\"}");
+        return Optional.of(saved);
     }
 
     @Override
     public Optional<Incident> handle(AcknowledgeIncidentCommand command) {
-        var incidentOpt = findAccessibleIncident(command.incidentId());
-        if (incidentOpt.isEmpty()) {
-            return Optional.empty();
-        }
-
-        var incident = incidentOpt.get();
-        String previousState = incident.getStatus();
-        incident.acknowledge();
-
-        var savedIncident = incidentRepository.save(incident);
-
-        var correlationId = UUID.randomUUID().toString();
-        var outbox = new SharedEventOutbox(
-                "INCIDENT_ACKNOWLEDGED",
-                "Incident",
-                String.valueOf(savedIncident.getId()),
-                "{\"incidentId\":" + savedIncident.getId() + ",\"status\":\"ACKNOWLEDGED\"}",
-                savedIncident.getLaboratory().getWorkspace() != null ? String.valueOf(savedIncident.getLaboratory().getWorkspace().getId()) : null,
-                correlationId,
-                SharedEventOutbox.DEFAULT_SCHEMA_VERSION
-        );
-        eventOutboxRepository.save(outbox);
-
-        var actor = jwtSecurityContextAdapter.getCurrentActor();
-        var signature = calculateHash(savedIncident.getId(), "ACKNOWLEDGE_INCIDENT", actor, previousState, "ACKNOWLEDGED");
-        var audit = new AuditTrail(
-                String.valueOf(savedIncident.getId()),
-                "ACKNOWLEDGE_INCIDENT",
-                actor,
-                previousState,
-                "ACKNOWLEDGED",
-                "Incident acknowledged by " + actor,
-                signature
-        );
-        auditTrailRepository.save(audit);
-
-        return Optional.of(savedIncident);
+        return transition(command.incidentId(), Incident::acknowledge, "INCIDENT_ACKNOWLEDGED",
+                inc -> "{\"incidentId\":" + inc.getId() + ",\"status\":\"ACKNOWLEDGED\"}");
     }
 
     @Override
     public Optional<Incident> handle(AttendIncidentCommand command) {
-        var incidentOpt = findAccessibleIncident(command.incidentId());
-        if (incidentOpt.isEmpty()) {
-            return Optional.empty();
-        }
-
-        var incident = incidentOpt.get();
-        String previousState = incident.getStatus();
-        incident.attend();
-
-        var savedIncident = incidentRepository.save(incident);
-
-        var correlationId = UUID.randomUUID().toString();
-        var outbox = new SharedEventOutbox(
-                "INCIDENT_ATTENDED",
-                "Incident",
-                String.valueOf(savedIncident.getId()),
-                "{\"incidentId\":" + savedIncident.getId() + ",\"status\":\"IN_PROGRESS\"}",
-                savedIncident.getLaboratory().getWorkspace() != null ? String.valueOf(savedIncident.getLaboratory().getWorkspace().getId()) : null,
-                correlationId,
-                SharedEventOutbox.DEFAULT_SCHEMA_VERSION
-        );
-        eventOutboxRepository.save(outbox);
-
-        var actor = jwtSecurityContextAdapter.getCurrentActor();
-        var signature = calculateHash(savedIncident.getId(), "ATTEND_INCIDENT", actor, previousState, "IN_PROGRESS");
-        var audit = new AuditTrail(
-                String.valueOf(savedIncident.getId()),
-                "ATTEND_INCIDENT",
-                actor,
-                previousState,
-                "IN_PROGRESS",
-                "Incident attention started by " + actor,
-                signature
-        );
-        auditTrailRepository.save(audit);
-
-        return Optional.of(savedIncident);
+        return transition(command.incidentId(), Incident::attend, "INCIDENT_ATTENDED",
+                inc -> "{\"incidentId\":" + inc.getId() + ",\"status\":\"IN_PROGRESS\"}");
     }
 
     @Override
     public Optional<Incident> handle(CloseIncidentCommand command) {
-        var incidentOpt = findAccessibleIncident(command.incidentId());
-        if (incidentOpt.isEmpty()) {
-            return Optional.empty();
-        }
-
-        var incident = incidentOpt.get();
-        String previousState = incident.getStatus();
-        incident.close();
-
-        var savedIncident = incidentRepository.save(incident);
-
-        var correlationId = UUID.randomUUID().toString();
-        var outbox = new SharedEventOutbox(
-                "INCIDENT_CLOSED",
-                "Incident",
-                String.valueOf(savedIncident.getId()),
-                "{\"incidentId\":" + savedIncident.getId() + ",\"status\":\"CLOSED\"}",
-                savedIncident.getLaboratory().getWorkspace() != null ? String.valueOf(savedIncident.getLaboratory().getWorkspace().getId()) : null,
-                correlationId,
-                SharedEventOutbox.DEFAULT_SCHEMA_VERSION
-        );
-        eventOutboxRepository.save(outbox);
-
-        var actor = jwtSecurityContextAdapter.getCurrentActor();
-        var signature = calculateHash(savedIncident.getId(), "CLOSE_INCIDENT", actor, previousState, "CLOSED");
-        var audit = new AuditTrail(
-                String.valueOf(savedIncident.getId()),
-                "CLOSE_INCIDENT",
-                actor,
-                previousState,
-                "CLOSED",
-                "Incident formally closed by " + actor,
-                signature
-        );
-        auditTrailRepository.save(audit);
-
-        return Optional.of(savedIncident);
+        return transition(command.incidentId(), Incident::close, "INCIDENT_CLOSED",
+                inc -> "{\"incidentId\":" + inc.getId() + ",\"status\":\"CLOSED\"}");
     }
 
     @Override
     public Optional<Incident> handle(ResolveIncidentCommand command) {
-        var incidentOpt = findAccessibleIncident(command.incidentId());
-        if (incidentOpt.isEmpty()) {
-            return Optional.empty();
-        }
-
-        var incident = incidentOpt.get();
-        String previousState = incident.getStatus();
-        var correctiveAction = new CorrectiveAction(incident, command.technicianId(), command.actionTaken());
-        incident.resolve(correctiveAction);
-
-        var savedIncident = incidentRepository.save(incident);
-
-        var correlationId = UUID.randomUUID().toString();
-        var outbox = new SharedEventOutbox(
+        return transition(command.incidentId(),
+                inc -> inc.resolve(new CorrectiveAction(inc, command.technicianId(), command.actionTaken())),
                 "INCIDENT_RESOLVED",
-                "Incident",
-                String.valueOf(savedIncident.getId()),
-                "{\"incidentId\":" + savedIncident.getId() + ",\"technicianId\":" + command.technicianId() + "}",
-                savedIncident.getLaboratory().getWorkspace() != null ? String.valueOf(savedIncident.getLaboratory().getWorkspace().getId()) : null,
-                correlationId,
-                SharedEventOutbox.DEFAULT_SCHEMA_VERSION
-        );
-        eventOutboxRepository.save(outbox);
-
-        var actor = jwtSecurityContextAdapter.getCurrentActor();
-        var signature = calculateHash(savedIncident.getId(), "RESOLVE_INCIDENT", actor, previousState, "RESOLVED");
-        var audit = new AuditTrail(
-                String.valueOf(savedIncident.getId()),
-                "RESOLVE_INCIDENT",
-                actor,
-                previousState,
-                "RESOLVED",
-                "Resolution action: " + command.actionTaken(),
-                signature
-        );
-        auditTrailRepository.save(audit);
-
-        return Optional.of(savedIncident);
+                inc -> "{\"incidentId\":" + inc.getId() + ",\"technicianId\":" + command.technicianId() + "}");
     }
 
     @Override
     public Optional<Incident> handle(ApplyEscalationCommand command) {
-        var incidentOpt = findAccessibleIncident(command.incidentId());
-        if (incidentOpt.isEmpty()) {
-            return Optional.empty();
-        }
+        return transition(command.incidentId(),
+                inc -> inc.escalate(command.nextRole()),
+                "INCIDENT_ESCALATED",
+                inc -> "{\"incidentId\":" + inc.getId() + ",\"escalatedTo\":\"" + inc.getEscalationNextRole() + "\"}");
+    }
+
+    private Optional<Incident> transition(Long incidentId, Consumer<Incident> action,
+                                          String eventType, java.util.function.Function<Incident, String> payloadFn) {
+        var incidentOpt = findAccessibleIncident(incidentId);
+        if (incidentOpt.isEmpty()) return Optional.empty();
 
         var incident = incidentOpt.get();
-        String previousState = incident.getStatus();
-        incident.escalate(command.nextRole());
-
-        var savedIncident = incidentRepository.save(incident);
-
-        var correlationId = UUID.randomUUID().toString();
-        var outbox = new SharedEventOutbox(
-                "INCIDENT_ESCALATED",
-                "Incident",
-                String.valueOf(savedIncident.getId()),
-                "{\"incidentId\":" + savedIncident.getId() + ",\"escalatedTo\":\"" + savedIncident.getEscalationNextRole() + "\"}",
-                savedIncident.getLaboratory().getWorkspace() != null ? String.valueOf(savedIncident.getLaboratory().getWorkspace().getId()) : null,
-                correlationId,
-                SharedEventOutbox.DEFAULT_SCHEMA_VERSION
-        );
-        eventOutboxRepository.save(outbox);
-
-        var actor = jwtSecurityContextAdapter.getCurrentActor();
-        var signature = calculateHash(savedIncident.getId(), "ESCALATE_INCIDENT", actor, previousState, "ESCALATED");
-        var audit = new AuditTrail(
-                String.valueOf(savedIncident.getId()),
-                "ESCALATE_INCIDENT",
-                actor,
-                previousState,
-                "ESCALATED",
-                "Incident escalated to " + savedIncident.getEscalationNextRole(),
-                signature
-        );
-        auditTrailRepository.save(audit);
-
-        return Optional.of(savedIncident);
+        action.accept(incident);
+        var saved = incidentRepository.save(incident);
+        publishOutbox(saved, eventType, payloadFn.apply(saved));
+        return Optional.of(saved);
     }
 
     private Optional<Incident> findAccessibleIncident(Long incidentId) {
@@ -326,14 +117,18 @@ public class IncidentCommandServiceImpl implements IncidentCommandService {
         return incidentRepository.findById(incidentId);
     }
 
-    private String calculateHash(Long entityId, String action, String actor, String previousState, String newState) {
-        try {
-            var raw = entityId + "|" + action + "|" + actor + "|" + previousState + "|" + newState + "|" + System.currentTimeMillis();
-            var digest = MessageDigest.getInstance("SHA-256");
-            byte[] encoded = digest.digest(raw.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(encoded);
-        } catch (Exception e) {
-            return UUID.randomUUID().toString();
-        }
+    private void publishOutbox(Incident incident, String eventType, String payload) {
+        String orgId = incident.getLaboratoryWorkspaceId() != null
+                ? String.valueOf(incident.getLaboratoryWorkspaceId())
+                : null;
+        eventOutboxRepository.save(new SharedEventOutbox(
+                eventType,
+                "Incident",
+                String.valueOf(incident.getId()),
+                payload,
+                orgId,
+                UUID.randomUUID().toString(),
+                SharedEventOutbox.DEFAULT_SCHEMA_VERSION
+        ));
     }
 }

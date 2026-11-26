@@ -2,10 +2,10 @@ package com.test.backend.compliance.domain.model.aggregates;
 
 import com.test.backend.shared.domain.model.aggregates.AuditableAbstractAggregateRoot;
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
-import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,13 +19,18 @@ import java.util.List;
     name = "audit_trails",
     catalog = "safelab_compliance",
     indexes = {
-        @Index(name = "idx_audit_trails_target_id", columnList = "target_id")
+        @Index(name = "idx_audit_trails_target_id", columnList = "target_id"),
+        @Index(name = "idx_audit_trails_organization_id", columnList = "organization_id"),
+        @Index(name = "idx_audit_trails_actor", columnList = "actor")
     }
 )
 public class AuditTrail extends AuditableAbstractAggregateRoot<AuditTrail> {
 
     @Column(name = "target_id")
     private String targetId;
+
+    @Column(name = "target_type")
+    private String targetType;
 
     private String action;
 
@@ -37,6 +42,12 @@ public class AuditTrail extends AuditableAbstractAggregateRoot<AuditTrail> {
 
     @Column(name = "new_state")
     private String newState;
+
+    @Column(name = "organization_id")
+    private Long organizationId;
+
+    @Column(name = "ip_address")
+    private String ipAddress;
 
     @Column(name = "details", length = 1000)
     private String details;
@@ -54,5 +65,16 @@ public class AuditTrail extends AuditableAbstractAggregateRoot<AuditTrail> {
         this.newState = newState;
         this.details = details;
         this.signature = signature;
+    }
+
+    public AuditTrail(String targetId, String targetType, String action, String actor,
+                      Long organizationId, String ipAddress, String details) {
+        this.targetId = targetId;
+        this.targetType = targetType;
+        this.action = action;
+        this.actor = actor;
+        this.organizationId = organizationId;
+        this.ipAddress = ipAddress;
+        this.details = details;
     }
 }

@@ -5,7 +5,6 @@ import com.test.backend.alerts.domain.model.commands.CreateIncidentCommand;
 import com.test.backend.alerts.domain.services.DuplicateIncidentPolicy;
 import com.test.backend.alerts.domain.services.IncidentCommandService;
 import com.test.backend.alerts.domain.services.ThermalExcursionEvaluator;
-import com.test.backend.labs.domain.model.aggregates.Laboratory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -45,7 +44,7 @@ class EvaluateReadingUseCaseImplTest {
                 .thenReturn(ThermalExcursionEvaluator.ExcursionSeverity.CRITICAL);
         when(duplicateIncidentPolicy.hasActiveIncident(labId)).thenReturn(false);
 
-        var incident = new Incident(new Laboratory(), "Title", "Desc", "CRITICAL", 15, "COORDINATOR");
+        var incident = new Incident(labId, "Title", "Desc", "CRITICAL", 15, "COORDINATOR");
         when(incidentCommandService.handle(any(CreateIncidentCommand.class))).thenReturn(Optional.of(incident));
 
         // Act

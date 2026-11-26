@@ -8,10 +8,13 @@ public class AuditTrailResourceFromEntityAssembler {
         return new AuditTrailResource(
                 entity.getId(),
                 entity.getTargetId(),
+                entity.getTargetType(),
                 entity.getAction(),
                 entity.getActor(),
                 entity.getPreviousState(),
                 entity.getNewState(),
+                entity.getOrganizationId(),
+                entity.getIpAddress(),
                 entity.getDetails(),
                 entity.getSignature(),
                 entity.getCreatedAt()

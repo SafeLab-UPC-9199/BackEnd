@@ -9,6 +9,7 @@ import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -41,6 +42,22 @@ public class User extends AuditableAbstractAggregateRoot<User> {
     @Column(length = 10)
     private String confirmationCode;
 
+    @Column(nullable = false)
+    private boolean twoFactorEnabled = false;
+
+    @Column(length = 64)
+    private String twoFactorSecret;
+
+    @Column(length = 2000)
+    private String backupCodesHash;
+
+    @Column(nullable = false)
+    private int failedAttempts = 0;
+
+    private Instant lockedUntil;
+
+    private Instant passwordUpdatedAt = Instant.now();
+
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(
             name = "user_iam_roles",
@@ -52,6 +69,7 @@ public class User extends AuditableAbstractAggregateRoot<User> {
 
     public User() {
         this.roles = new HashSet<>();
+        this.passwordUpdatedAt = Instant.now();
     }
 
     public User(String email, String password, String fullName) {
@@ -69,5 +87,12 @@ public class User extends AuditableAbstractAggregateRoot<User> {
     public User addRoles(List<Role> roles) {
         this.roles.addAll(roles);
         return this;
+    }
+
+    public boolean isPasswordExpired(int maxDays) {
+        if (passwordUpdatedAt == null) {
+            return false;
+        }
+        return passwordUpdatedAt.plusSeconds((long) maxDays * 86_400L).isBefore(Instant.now());
     }
 }

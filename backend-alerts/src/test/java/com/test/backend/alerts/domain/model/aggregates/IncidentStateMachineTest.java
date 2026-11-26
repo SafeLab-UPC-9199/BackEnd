@@ -1,7 +1,6 @@
 package com.test.backend.alerts.domain.model.aggregates;
 
 import com.test.backend.alerts.domain.model.entities.CorrectiveAction;
-import com.test.backend.labs.domain.model.aggregates.Laboratory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -15,9 +14,7 @@ class IncidentStateMachineTest {
 
     @BeforeEach
     void setUp() {
-        var laboratory = new Laboratory();
-        laboratory.setName("Bio-Safety Lab 01");
-        incident = new Incident(laboratory, "Thermal Spike", "Temperature exceeded threshold", "CRITICAL", 15, "COORDINATOR");
+        incident = new Incident(1L, "Thermal Spike", "Temperature exceeded threshold", "CRITICAL", 15, "COORDINATOR");
     }
 
     @Test

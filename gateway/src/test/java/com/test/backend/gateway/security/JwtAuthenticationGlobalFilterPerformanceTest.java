@@ -47,6 +47,7 @@ class JwtAuthenticationGlobalFilterPerformanceTest {
 
     private String validToken() {
         return Jwts.builder()
+                .issuer("safelab-iam")
                 .subject("u202312510@upc.edu.pe")
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + 60_000))

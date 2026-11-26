@@ -3,6 +3,8 @@ package com.test.backend.iam.interfaces.rest;
 import com.test.backend.iam.domain.model.commands.ConfirmAccountCommand;
 import com.test.backend.iam.domain.model.commands.ResendConfirmationCodeCommand;
 import com.test.backend.iam.domain.model.commands.UpdatePasswordCommand;
+import com.test.backend.iam.domain.model.exceptions.AccountLockedException;
+import com.test.backend.iam.domain.model.exceptions.InvalidTwoFactorCodeException;
 import com.test.backend.iam.domain.model.exceptions.UserAlreadyExistsException;
 import com.test.backend.iam.domain.model.exceptions.UserNotConfirmedException;
 import com.test.backend.iam.domain.services.UserCommandService;
@@ -18,6 +20,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -45,15 +48,27 @@ public class AuthenticationController {
         return email != null && EMAIL_PATTERN.matcher(email.trim()).matches();
     }
 
+    private String extractClientIp(HttpServletRequest request) {
+        if (request == null) {
+            return "unknown";
+        }
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            return forwarded.split(",")[0].trim();
+        }
+        return request.getRemoteAddr() != null ? request.getRemoteAddr() : "unknown";
+    }
+
     @PostMapping("/sign-in")
     @Operation(summary = "Sign In", description = "Authenticates a user and returns a token")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Credentials verified successfully, returning the cryptographic JWT token signed with HMAC-SHA256",
+            @ApiResponse(responseCode = "200", description = "Credentials verified successfully",
                     content = @Content(mediaType = "application/json", schema = @Schema(implementation = AuthenticatedUserResource.class))),
             @ApiResponse(responseCode = "400", description = "Required fields missing or invalid institutional email syntax", content = @Content),
-            @ApiResponse(responseCode = "401", description = "Incorrect password or unconfirmed account in email service", content = @Content)
+            @ApiResponse(responseCode = "401", description = "Incorrect password, invalid 2FA code, or unconfirmed account", content = @Content),
+            @ApiResponse(responseCode = "423", description = "Account temporarily locked due to failed attempts", content = @Content)
     })
-    public ResponseEntity<?> signIn(@RequestBody SignInResource signInResource) {
+    public ResponseEntity<?> signIn(@RequestBody SignInResource signInResource, HttpServletRequest request) {
         if (signInResource == null || signInResource.email() == null || signInResource.email().isBlank()
                 || signInResource.password() == null || signInResource.password().isBlank()
                 || !isValidEmail(signInResource.email())) {
@@ -62,7 +77,12 @@ public class AuthenticationController {
         }
 
         try {
-            var signInCommand = SignInCommandFromResourceAssembler.toCommandFromResource(signInResource);
+            var signInCommand = SignInCommandFromResourceAssembler.toCommandFromResource(
+                    signInResource,
+                    extractClientIp(request),
+                    request != null ? request.getHeader("User-Agent") : null,
+                    request != null ? request.getHeader("X-Geo-Location") : null
+            );
             var authenticatedUser = userCommandService.handle(signInCommand);
             if (authenticatedUser.isEmpty()) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -70,6 +90,15 @@ public class AuthenticationController {
             }
             var authenticatedUserResource = AuthenticatedUserResourceFromEntityAssembler.toResourceFromEntity(authenticatedUser.get());
             return ResponseEntity.ok(authenticatedUserResource);
+        } catch (AccountLockedException e) {
+            return ResponseEntity.status(HttpStatus.LOCKED)
+                    .body(Map.of(
+                            "message", e.getMessage(),
+                            "lockedUntil", e.getLockedUntil().toString()
+                    ));
+        } catch (InvalidTwoFactorCodeException e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("message", e.getMessage()));
         } catch (UserNotConfirmedException e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("message", "Incorrect password or unconfirmed account in email service", "email", signInResource.email()));
@@ -133,7 +162,6 @@ public class AuthenticationController {
     @DeleteMapping("/clean-test-users")
     @Operation(summary = "Clean Test Users", description = "Deletes all registered test users and their profiles, keeping only the default administrator.")
     public ResponseEntity<Void> cleanTestUsers() {
-        // QAS-05: destructive admin operation - no longer permitAll, Administrator only.
         if (!RequestIdentity.isAdmin()) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
@@ -144,7 +172,13 @@ public class AuthenticationController {
     @PutMapping("/password")
     @Operation(summary = "Update Password", description = "Updates the password of the currently authenticated user")
     public ResponseEntity<Void> updatePassword(@RequestBody UpdatePasswordResource resource) {
-        var email = SecurityContextHolder.getContext().getAuthentication().getName();
+        var email = RequestIdentity.currentUserEmail().orElseGet(() -> {
+            var auth = SecurityContextHolder.getContext().getAuthentication();
+            return auth != null ? auth.getName() : null;
+        });
+        if (email == null || email.isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
         var command = new UpdatePasswordCommand(email, resource.currentPassword(), resource.newPassword());
         var result = userCommandService.handle(command);
         if (!result) {

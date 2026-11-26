@@ -2,6 +2,7 @@ package com.test.backend.iam.infrastructure.authorization.sfs.pipeline;
 
 import com.test.backend.iam.infrastructure.authorization.sfs.model.UsernamePasswordAuthenticationTokenBuilder;
 import com.test.backend.iam.infrastructure.tokens.jwt.BearerTokenService;
+import com.test.backend.shared.infrastructure.security.RequestIdentity;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -33,12 +34,21 @@ public class BearerAuthorizationRequestFilter extends OncePerRequestFilter {
                                     @NonNull FilterChain filterChain) throws ServletException, IOException {
         try {
             var token = tokenService.getBearerTokenFrom(request);
-            if (token != null && tokenService.validateToken(token)) {
-                var email = tokenService.getEmailFromToken(token);
+            String email = null;
+            if (token != null) {
+                if (tokenService.validateToken(token)) {
+                    email = tokenService.getEmailFromToken(token);
+                }
+            } else if (SecurityContextHolder.getContext().getAuthentication() == null) {
+                var gatewayEmail = request.getHeader(RequestIdentity.HEADER_USER_EMAIL);
+                if (gatewayEmail != null && !gatewayEmail.isBlank()) {
+                    email = gatewayEmail.trim();
+                }
+            }
+            if (email != null) {
                 var userDetails = userDetailsService.loadUserByUsername(email);
                 var authentication = UsernamePasswordAuthenticationTokenBuilder.build(userDetails, request);
                 SecurityContextHolder.getContext().setAuthentication(authentication);
-                logger.info("Successfully authenticated user: {}", email);
             }
         } catch (Exception e) {
             logger.error("Cannot set user authentication: {}", e.getMessage());

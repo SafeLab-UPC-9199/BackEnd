@@ -1,13 +1,12 @@
 package com.test.backend.alerts.domain.model.aggregates;
 
 import com.test.backend.alerts.domain.model.entities.CorrectiveAction;
-import com.test.backend.labs.domain.model.aggregates.Laboratory;
 import com.test.backend.shared.domain.model.aggregates.AuditableAbstractAggregateRoot;
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
-import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.time.LocalDateTime;
 
@@ -19,9 +18,11 @@ import java.time.LocalDateTime;
 @Table(name = "incidents", catalog = "safelab_alerts")
 public class Incident extends AuditableAbstractAggregateRoot<Incident> {
 
-    @ManyToOne
-    @JoinColumn(name = "laboratory_id", nullable = false)
-    private Laboratory laboratory;
+    @Column(name = "laboratory_id", nullable = false)
+    private Long laboratoryId;
+
+    @Column(name = "laboratory_workspace_id")
+    private Long laboratoryWorkspaceId;
 
     @Column(name = "title")
     private String title;
@@ -49,8 +50,9 @@ public class Incident extends AuditableAbstractAggregateRoot<Incident> {
     @OneToOne(mappedBy = "incident", cascade = CascadeType.ALL)
     private CorrectiveAction correctiveAction;
 
-    public Incident(Laboratory laboratory, String title, String description, String severity, Integer escalationMaxMins, String escalationNextRole) {
-        this.laboratory = laboratory;
+    public Incident(Long laboratoryId, String title, String description, String severity,
+                    Integer escalationMaxMins, String escalationNextRole) {
+        this.laboratoryId = laboratoryId;
         this.title = title;
         this.description = description;
         this.severity = severity != null ? severity : "CRITICAL";

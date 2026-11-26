@@ -26,6 +26,7 @@ public final class RequestIdentity {
     public static final String HEADER_USER_EMAIL = "X-User-Email";
     public static final String HEADER_USER_ROLES = "X-User-Roles";
     public static final String HEADER_WORKSPACE_ID = "X-Workspace-Id";
+    public static final String HEADER_SESSION_ID = "X-Session-Id";
 
     /** Role name checked by admin gates; mirrors backend-iam's Roles enum. */
     public static final String ROLE_ADMIN = "ROLE_ADMIN";
@@ -36,6 +37,10 @@ public final class RequestIdentity {
     /** Email of the authenticated caller ({@code sub} claim), if any. */
     public static Optional<String> currentUserEmail() {
         return nonBlank(header(HEADER_USER_EMAIL));
+    }
+
+    public static String sessionId() {
+        return nonBlank(header(HEADER_SESSION_ID)).map(String::trim).orElse(null);
     }
 
     /**

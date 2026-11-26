@@ -26,6 +26,10 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webflux</artifactId>
 		</dependency>
+		<dependency>
+			<groupId>com.bucket4j</groupId>
+			<artifactId>bucket4j-core</artifactId>
+		</dependency>
 		<!-- Fase 6 (ADR-006): the gateway validates the JWT locally with the
 		     same HS256 secret as backend-iam instead of introspecting it per
 		     request. Versions come from the root dependencyManagement. -->

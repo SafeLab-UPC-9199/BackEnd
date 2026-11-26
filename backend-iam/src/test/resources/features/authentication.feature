@@ -37,3 +37,19 @@ Característica: Autenticación y autorización (US04 - Acceso al sistema)
       | password | SecurePass123!          |
       | fullName | Operador Laboratorio    |
     Entonces la respuesta debe ser 409
+
+  Escenario: Desafío 2FA cuando el usuario tiene TOTP habilitado
+    Dado que existe un usuario registrado con email "admin@safelab.edu.pe" con 2FA habilitado
+    Cuando envío una petición POST a "/api/v1/authentication/sign-in" con body:
+      | email    | admin@safelab.edu.pe |
+      | password | SecurePass123!       |
+    Entonces la respuesta debe ser 200
+    Y se solicita verificación de segundo factor
+
+  Escenario: Bloqueo temporal tras cinco intentos fallidos
+    Dado que existe un usuario registrado con email "bloqueado@safelab.edu.pe"
+    Cuando fallo el inicio de sesión 5 veces para "bloqueado@safelab.edu.pe"
+    Y envío una petición POST a "/api/v1/authentication/sign-in" con body:
+      | email    | bloqueado@safelab.edu.pe |
+      | password | SecurePass123!           |
+    Entonces la respuesta debe ser 423

@@ -1,7 +1,6 @@
 package com.test.backend.alerts.domain.model.aggregates;
 
 import com.test.backend.alerts.domain.model.commands.CreateAlertCommand;
-import com.test.backend.labs.domain.model.aggregates.Laboratory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -15,8 +14,6 @@ class AlertStateMachineTest {
 
     @BeforeEach
     void setUp() {
-        var laboratory = new Laboratory();
-        laboratory.setName("Bio-Safety Lab 02");
         var command = new CreateAlertCommand(
                 "High Pressure Alert",
                 "Pressure reading spike",
@@ -26,7 +23,7 @@ class AlertStateMachineTest {
                 "Just now",
                 1L
         );
-        alert = new Alert(command, laboratory);
+        alert = new Alert(command, 1L);
     }
 
     @Test

@@ -1,15 +1,14 @@
 package com.test.backend.alerts.domain.model.aggregates;
 
+import com.test.backend.alerts.domain.model.commands.CreateAlertCommand;
+import com.test.backend.alerts.domain.model.commands.UpdateAlertCommand;
 import com.test.backend.alerts.domain.model.entities.AlertMetric;
-import com.test.backend.labs.domain.model.aggregates.Laboratory;
 import com.test.backend.shared.domain.model.aggregates.AuditableAbstractAggregateRoot;
 import jakarta.persistence.*;
-import lombok.Getter;
-import lombok.Setter;
-import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
-
-import com.test.backend.automation.domain.model.aggregates.SensorConfiguration;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -21,12 +20,15 @@ import java.util.List;
 @AllArgsConstructor
 @Table(name = "alerts", catalog = "safelab_alerts")
 public class Alert extends AuditableAbstractAggregateRoot<Alert> {
-    @ManyToOne
-    @JoinColumn(name = "laboratory_id", nullable = true)
-    private Laboratory laboratory;
-    @ManyToOne
-    @JoinColumn(name = "sensor_configuration_id", nullable = true)
-    private SensorConfiguration sensorConfiguration;
+
+    @Column(name = "laboratory_id", nullable = true)
+    private Long laboratoryId;
+
+    @Column(name = "laboratory_workspace_id")
+    private Long laboratoryWorkspaceId;
+
+    @Column(name = "sensor_configuration_id", nullable = true)
+    private String sensorConfigurationId;
 
     private String title;
 
@@ -45,8 +47,8 @@ public class Alert extends AuditableAbstractAggregateRoot<Alert> {
     @OneToMany(mappedBy = "alert", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<AlertMetric> metrics = new ArrayList<>();
 
-    public Alert(com.test.backend.alerts.domain.model.commands.CreateAlertCommand command, Laboratory laboratory) {
-        this.laboratory = laboratory;
+    public Alert(CreateAlertCommand command, Long laboratoryId) {
+        this.laboratoryId = laboratoryId;
         this.title = command.title();
         this.description = command.description();
         this.severity = command.severity();
@@ -55,8 +57,8 @@ public class Alert extends AuditableAbstractAggregateRoot<Alert> {
         this.timeAgo = command.timeAgo();
     }
 
-    public Alert updateFrom(com.test.backend.alerts.domain.model.commands.UpdateAlertCommand command, Laboratory laboratory) {
-        this.laboratory = laboratory;
+    public Alert updateFrom(UpdateAlertCommand command, Long laboratoryId) {
+        this.laboratoryId = laboratoryId;
         this.title = command.title();
         this.description = command.description();
         this.severity = command.severity();

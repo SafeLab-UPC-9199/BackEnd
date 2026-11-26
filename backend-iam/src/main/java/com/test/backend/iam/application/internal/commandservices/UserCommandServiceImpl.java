@@ -3,6 +3,10 @@ package com.test.backend.iam.application.internal.commandservices;
 import com.test.backend.iam.application.internal.outboundservices.email.EmailService;
 import com.test.backend.iam.application.internal.outboundservices.hashing.HashingService;
 import com.test.backend.iam.application.internal.outboundservices.tokens.TokenService;
+import com.test.backend.iam.application.internal.security.AccountProtectionService;
+import com.test.backend.iam.application.internal.security.SecurityEventPublisher;
+import com.test.backend.iam.application.internal.security.SessionAuditService;
+import com.test.backend.iam.application.internal.security.TwoFactorService;
 import com.test.backend.iam.domain.model.aggregates.User;
 import com.test.backend.iam.domain.model.commands.ConfirmAccountCommand;
 import com.test.backend.iam.domain.model.commands.ResendConfirmationCodeCommand;
@@ -11,6 +15,7 @@ import com.test.backend.iam.domain.model.commands.SignUpCommand;
 import com.test.backend.iam.domain.model.commands.UpdatePasswordCommand;
 import com.test.backend.iam.domain.model.entities.Role;
 import com.test.backend.iam.domain.model.events.UserRegisteredEvent;
+import com.test.backend.iam.domain.model.exceptions.InvalidTwoFactorCodeException;
 import com.test.backend.iam.domain.model.exceptions.UserAlreadyExistsException;
 import com.test.backend.iam.domain.model.exceptions.UserNotConfirmedException;
 import com.test.backend.iam.domain.model.valueobjects.AuthenticatedUser;
@@ -25,6 +30,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -41,12 +47,22 @@ public class UserCommandServiceImpl implements UserCommandService {
     private final ApplicationEventPublisher eventPublisher;
     private final EmailService emailService;
     private final EntityManager entityManager;
+    private final TwoFactorService twoFactorService;
+    private final SessionAuditService sessionAuditService;
+    private final AccountProtectionService accountProtectionService;
+    private final SecurityEventPublisher securityEventPublisher;
 
-    public UserCommandServiceImpl(UserRepository userRepository, IamRoleRepository roleRepository,
-                                   HashingService hashingService, TokenService tokenService,
-                                   ApplicationEventPublisher eventPublisher,
-                                   EmailService emailService,
-                                   EntityManager entityManager) {
+    public UserCommandServiceImpl(UserRepository userRepository,
+                                  IamRoleRepository roleRepository,
+                                  HashingService hashingService,
+                                  TokenService tokenService,
+                                  ApplicationEventPublisher eventPublisher,
+                                  EmailService emailService,
+                                  EntityManager entityManager,
+                                  TwoFactorService twoFactorService,
+                                  SessionAuditService sessionAuditService,
+                                  AccountProtectionService accountProtectionService,
+                                  SecurityEventPublisher securityEventPublisher) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.hashingService = hashingService;
@@ -54,32 +70,73 @@ public class UserCommandServiceImpl implements UserCommandService {
         this.eventPublisher = eventPublisher;
         this.emailService = emailService;
         this.entityManager = entityManager;
+        this.twoFactorService = twoFactorService;
+        this.sessionAuditService = sessionAuditService;
+        this.accountProtectionService = accountProtectionService;
+        this.securityEventPublisher = securityEventPublisher;
     }
 
     @Override
-    @Transactional(readOnly = true)
     public Optional<AuthenticatedUser> handle(SignInCommand command) {
-        var user = userRepository.findByEmail(command.email());
-        if (user.isEmpty()) {
+        String ipAddress = command.ipAddress() != null && !command.ipAddress().isBlank()
+                ? command.ipAddress()
+                : "unknown";
+        var userOpt = userRepository.findByEmail(command.email());
+        accountProtectionService.checkNotLocked(userOpt.orElse(null), ipAddress);
+
+        if (userOpt.isEmpty()) {
+            accountProtectionService.recordFailedAttempt(null, ipAddress);
+            securityEventPublisher.publishLoginFailed(command.email(), null, ipAddress, "Account not found");
             return Optional.empty();
         }
-        if (!hashingService.matches(command.password(), user.get().getPassword())) {
+
+        var user = userOpt.get();
+        Long workspaceId = resolveWorkspaceId(user.getEmail());
+
+        if (!hashingService.matches(command.password(), user.getPassword())) {
+            accountProtectionService.recordFailedAttempt(user, ipAddress);
+            securityEventPublisher.publishLoginFailed(user.getEmail(), workspaceId, ipAddress, "Invalid password");
             return Optional.empty();
         }
-        if (!user.get().isConfirmed()) {
+        if (!user.isConfirmed()) {
             throw new UserNotConfirmedException("User account is not confirmed");
         }
-        var roles = user.get().getRoles().stream().map(Role::getStringName).toList();
-        var token = tokenService.generateToken(user.get().getEmail(), roles, resolveWorkspaceId(user.get().getEmail()));
-        return Optional.of(new AuthenticatedUser(user.get(), token));
+
+        boolean passwordExpired = accountProtectionService.isAtRisk(user);
+        String securityStatus = passwordExpired ? "AT_RISK" : "SECURE";
+
+        if (user.isTwoFactorEnabled()) {
+            boolean hasTotp = command.totpCode() != null && !command.totpCode().isBlank();
+            boolean hasBackup = command.backupCode() != null && !command.backupCode().isBlank();
+            if (!hasTotp && !hasBackup) {
+                return Optional.of(new AuthenticatedUser(
+                        user, null, workspaceId, true, passwordExpired, passwordExpired, securityStatus));
+            }
+            boolean totpValid = hasTotp && twoFactorService.verifyTotp(user.getTwoFactorSecret(), command.totpCode());
+            boolean backupValid = !totpValid && hasBackup
+                    && twoFactorService.verifyAndConsumeBackupCode(user, command.backupCode());
+            if (!totpValid && !backupValid) {
+                accountProtectionService.recordFailedAttempt(user, ipAddress);
+                securityEventPublisher.publish2faFailed(user.getEmail(), workspaceId, ipAddress, "Invalid 2FA code");
+                throw new InvalidTwoFactorCodeException("Invalid two-factor authentication code");
+            }
+            if (backupValid) {
+                userRepository.save(user);
+            }
+        }
+
+        accountProtectionService.resetFailedAttempts(user, ipAddress);
+        var session = sessionAuditService.createSession(
+                user, workspaceId, ipAddress, command.userAgent(), command.location());
+        var roles = user.getRoles().stream().map(Role::getStringName).toList();
+        var token = tokenService.generateToken(user.getEmail(), roles, workspaceId, session.getSessionId());
+        securityEventPublisher.publishLoginSucceeded(
+                user.getEmail(), workspaceId, ipAddress, "Session created: " + session.getSessionId());
+
+        return Optional.of(new AuthenticatedUser(
+                user, token, workspaceId, false, passwordExpired, passwordExpired, securityStatus));
     }
 
-    /**
-     * Best-effort workspace claim for the token (Fase 6, ADR-006). The caller's
-     * workspace lives in automation's user_profiles; when the profile does not
-     * exist yet (or the schema is unavailable) the token is issued without the
-     * claim and services fall back to the seeded base workspace.
-     */
     private Long resolveWorkspaceId(String email) {
         try {
             Object result = entityManager.createNativeQuery(
@@ -92,7 +149,6 @@ public class UserCommandServiceImpl implements UserCommandService {
         }
     }
 
-
     @Override
     public Optional<User> handle(SignUpCommand command) {
         if (userRepository.existsByEmail(command.email())) {
@@ -103,9 +159,7 @@ public class UserCommandServiceImpl implements UserCommandService {
         if (command.roles() == null || command.roles().isEmpty()) {
             roleRepository.findByName(Roles.ROLE_USER).ifPresent(roles::add);
         } else {
-            command.roles().forEach(roleName -> {
-                roleRepository.findByName(roleName).ifPresent(roles::add);
-            });
+            command.roles().forEach(roleName -> roleRepository.findByName(roleName).ifPresent(roles::add));
         }
 
         var user = new User(
@@ -115,7 +169,6 @@ public class UserCommandServiceImpl implements UserCommandService {
                 roles
         );
 
-        // Special handling for the demo seeded user admin@safelab.com
         if ("admin@safelab.com".equals(command.email())) {
             user.setConfirmed(true);
             userRepository.save(user);
@@ -183,6 +236,7 @@ public class UserCommandServiceImpl implements UserCommandService {
             return false;
         }
         user.setPassword(hashingService.encode(command.newPassword()));
+        user.setPasswordUpdatedAt(Instant.now());
         userRepository.save(user);
         return true;
     }
@@ -190,7 +244,7 @@ public class UserCommandServiceImpl implements UserCommandService {
     private Long getMaxSeededId(String settingKey) {
         try {
             Object val = entityManager.createNativeQuery(
-                "SELECT value FROM safelab_automation.general_settings WHERE setting_key = ?1"
+                    "SELECT value FROM safelab_automation.general_settings WHERE setting_key = ?1"
             ).setParameter(1, settingKey).getSingleResult();
             if (val != null) {
                 return Long.parseLong(val.toString());
@@ -248,69 +302,26 @@ public class UserCommandServiceImpl implements UserCommandService {
         Long maxSeededEquipmentThresholdId = getMaxSeededId("max_seeded_equipment_threshold_id");
         Long maxSeededWorkspaceId = getMaxSeededId("max_seeded_workspace_id");
 
-        // Native deletions in exact dependency order:
-
-        // 1. calibration_records
         entityManager.createNativeQuery("DELETE FROM safelab_automation.calibration_records WHERE id > ?1").setParameter(1, maxSeededCalibrationId).executeUpdate();
-
-        // 2. sensor_readings
         entityManager.createNativeQuery("DELETE FROM safelab_telemetry.sensor_readings WHERE id > ?1").setParameter(1, maxSeededReadingId).executeUpdate();
-
-        // 3. alert_metrics
         entityManager.createNativeQuery("DELETE FROM safelab_alerts.alert_metrics WHERE id > ?1").setParameter(1, maxSeededAlertMetricId).executeUpdate();
-
-        // 4. alerts
         entityManager.createNativeQuery("DELETE FROM safelab_alerts.alerts WHERE id > ?1").setParameter(1, maxSeededAlertId).executeUpdate();
-
-        // 5. mitigation_systems
         entityManager.createNativeQuery("DELETE FROM safelab_labs.mitigation_systems WHERE id > ?1").setParameter(1, maxSeededMitigationSystemId).executeUpdate();
-
-        // 6. storage_units
         entityManager.createNativeQuery("DELETE FROM safelab_labs.storage_units WHERE id > ?1").setParameter(1, maxSeededStorageUnitId).executeUpdate();
-
-        // 7. lab_metric_subscriptions
         entityManager.createNativeQuery("DELETE FROM safelab_labs.lab_metric_subscriptions WHERE id > ?1").setParameter(1, maxSeededMetricSubId).executeUpdate();
-
-        // 8. lab_metrics
         entityManager.createNativeQuery("DELETE FROM safelab_labs.lab_metrics WHERE id > ?1").setParameter(1, maxSeededMetricId).executeUpdate();
-
-        // 9. lab_activities
         entityManager.createNativeQuery("DELETE FROM safelab_labs.lab_activities WHERE id > ?1").setParameter(1, maxSeededActivityId).executeUpdate();
-
-        // 10. lab_schedules
         entityManager.createNativeQuery("DELETE FROM safelab_labs.lab_schedules WHERE id > ?1").setParameter(1, maxSeededScheduleId).executeUpdate();
-
-        // 11. history_records
         entityManager.createNativeQuery("DELETE FROM safelab_history.history_records WHERE id > ?1").setParameter(1, maxSeededHistoryId).executeUpdate();
-
-        // 12. sensor_configurations
         entityManager.createNativeQuery("DELETE FROM safelab_automation.sensor_configurations WHERE id > ?1").setParameter(1, maxSeededSensorId).executeUpdate();
-
-        // 13. equipment_thresholds
         entityManager.createNativeQuery("DELETE FROM safelab_automation.equipment_thresholds WHERE id > ?1").setParameter(1, maxSeededEquipmentThresholdId).executeUpdate();
-
-        // 14. lab_user_accesses
         entityManager.createNativeQuery("DELETE FROM safelab_automation.lab_user_accesses WHERE id > ?1").setParameter(1, maxSeededLabAccessId).executeUpdate();
-
-        // 15. user_workspace_accesses
         entityManager.createNativeQuery("DELETE FROM safelab_automation.user_workspace_accesses WHERE id > ?1").setParameter(1, maxSeededWorkspaceAccessId).executeUpdate();
-
-        // 16. notification_preferences
         entityManager.createNativeQuery("DELETE FROM safelab_automation.notification_preferences WHERE id > ?1").setParameter(1, maxSeededNotificationPrefId).executeUpdate();
-
-        // 17. user_profiles
         entityManager.createNativeQuery("DELETE FROM safelab_automation.user_profiles WHERE id > ?1").setParameter(1, maxSeededProfileId).executeUpdate();
-
-        // 18. user_iam_roles
         entityManager.createNativeQuery("DELETE FROM safelab_iam.user_iam_roles WHERE user_id > ?1").setParameter(1, maxSeededUserId).executeUpdate();
-
-        // 19. users
         entityManager.createNativeQuery("DELETE FROM safelab_iam.users WHERE id > ?1").setParameter(1, maxSeededUserId).executeUpdate();
-
-        // 20. laboratories
         entityManager.createNativeQuery("DELETE FROM safelab_labs.laboratories WHERE id > ?1").setParameter(1, maxSeededLabId).executeUpdate();
-
-        // 21. workspaces
         entityManager.createNativeQuery("DELETE FROM safelab_labs.workspaces WHERE id > ?1").setParameter(1, maxSeededWorkspaceId).executeUpdate();
 
         logger.info("Successfully performed pristine database reset. Seeded data is preserved.");

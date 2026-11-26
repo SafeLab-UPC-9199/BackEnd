@@ -5,7 +5,6 @@ import com.test.backend.alerts.domain.model.queries.GetIncidentByIdQuery;
 import com.test.backend.alerts.domain.model.queries.GetIncidentsQuery;
 import com.test.backend.alerts.infrastructure.persistence.jpa.repositories.IncidentRepository;
 import com.test.backend.alerts.infrastructure.security.JWTSecurityContextAdapter;
-import com.test.backend.labs.domain.model.aggregates.Laboratory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,8 +36,7 @@ class IncidentQueryServiceImplTest {
     @DisplayName("Retrieves incidents filtered strictly by current workspace")
     void shouldRetrieveIncidentsScopedByWorkspace() {
         // Arrange
-        var lab = new Laboratory();
-        var incident = new Incident(lab, "Leak", "Sensor 01 leak", "CRITICAL", 15, "COORDINATOR");
+        var incident = new Incident(1L, "Leak", "Sensor 01 leak", "CRITICAL", 15, "COORDINATOR");
         ReflectionTestUtils.setField(incident, "id", 1L);
 
         when(jwtSecurityContextAdapter.getCurrentWorkspaceId()).thenReturn(Optional.of(5L));
@@ -57,8 +55,7 @@ class IncidentQueryServiceImplTest {
     @DisplayName("Retrieves single incident scoped by workspace")
     void shouldRetrieveSingleIncidentScopedByWorkspace() {
         // Arrange
-        var lab = new Laboratory();
-        var incident = new Incident(lab, "Overheat", "Overheat alert", "CRITICAL", 15, "COORDINATOR");
+        var incident = new Incident(1L, "Overheat", "Overheat alert", "CRITICAL", 15, "COORDINATOR");
         ReflectionTestUtils.setField(incident, "id", 50L);
 
         when(jwtSecurityContextAdapter.getCurrentWorkspaceId()).thenReturn(Optional.of(5L));

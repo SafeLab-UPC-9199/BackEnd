@@ -4,293 +4,116 @@ import com.test.backend.alerts.domain.model.aggregates.Alert;
 import com.test.backend.alerts.domain.model.commands.*;
 import com.test.backend.alerts.domain.services.AlertCommandService;
 import com.test.backend.alerts.infrastructure.persistence.jpa.repositories.AlertRepository;
-import com.test.backend.compliance.domain.model.aggregates.AuditTrail;
-import com.test.backend.compliance.infrastructure.persistence.jpa.repositories.AuditTrailRepository;
-import com.test.backend.history.domain.model.aggregates.HistoryRecord;
-import com.test.backend.history.infrastructure.persistence.jpa.repositories.HistoryRecordRepository;
-import com.test.backend.labs.domain.model.aggregates.Laboratory;
-import com.test.backend.labs.infrastructure.persistence.jpa.repositories.LaboratoryRepository;
+import com.test.backend.alerts.infrastructure.security.JWTSecurityContextAdapter;
+import com.test.backend.shared.domain.model.entities.SharedEventOutbox;
+import com.test.backend.shared.infrastructure.persistence.jpa.repositories.SharedEventOutboxRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.time.LocalDateTime;
-import java.util.HexFormat;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 @Service
+@Transactional
 public class AlertCommandServiceImpl implements AlertCommandService {
 
     private final AlertRepository alertRepository;
-    private final LaboratoryRepository laboratoryRepository;
-    private final com.test.backend.shared.application.CurrentWorkspaceService currentWorkspaceService;
-    private final HistoryRecordRepository historyRecordRepository;
-    private final AuditTrailRepository auditTrailRepository;
+    private final SharedEventOutboxRepository eventOutboxRepository;
+    private final JWTSecurityContextAdapter jwtSecurityContextAdapter;
 
     public AlertCommandServiceImpl(AlertRepository alertRepository,
-                                   LaboratoryRepository laboratoryRepository,
-                                   com.test.backend.shared.application.CurrentWorkspaceService currentWorkspaceService,
-                                   HistoryRecordRepository historyRecordRepository,
-                                   AuditTrailRepository auditTrailRepository) {
+                                   SharedEventOutboxRepository eventOutboxRepository,
+                                   JWTSecurityContextAdapter jwtSecurityContextAdapter) {
         this.alertRepository = alertRepository;
-        this.laboratoryRepository = laboratoryRepository;
-        this.currentWorkspaceService = currentWorkspaceService;
-        this.historyRecordRepository = historyRecordRepository;
-        this.auditTrailRepository = auditTrailRepository;
+        this.eventOutboxRepository = eventOutboxRepository;
+        this.jwtSecurityContextAdapter = jwtSecurityContextAdapter;
     }
 
     @Override
-    @Transactional
     public Optional<Alert> handle(CreateAlertCommand command) {
-        Long workspaceId = currentWorkspaceService.getCurrentWorkspaceId()
-                .orElseThrow(() -> new IllegalStateException("User does not have an active workspace"));
-
-        Laboratory laboratory = null;
-        if (command.laboratoryId() != null) {
-            laboratory = laboratoryRepository.findByIdAndWorkspaceId(command.laboratoryId(), workspaceId)
-                    .orElseThrow(() -> new IllegalArgumentException("Laboratory not found in this workspace"));
-        }
-        var alert = new Alert(command, laboratory);
-        alertRepository.save(alert);
-
-        // Save history record
-        var record = new HistoryRecord();
-        record.setLaboratory(laboratory);
-        record.setName(alert.getTitle());
-        record.setDescription(alert.getDescription());
-        record.setOccurredAt(LocalDateTime.now());
-        record.setEventType("incident");
-        record.setSeverity(alert.getSeverity());
-        record.setStatus("Active");
-        historyRecordRepository.save(record);
-
-        return Optional.of(alert);
+        var alert = new Alert(command, command.laboratoryId());
+        jwtSecurityContextAdapter.getCurrentWorkspaceId().ifPresent(alert::setLaboratoryWorkspaceId);
+        return Optional.of(alertRepository.save(alert));
     }
 
     @Override
-    @Transactional
     public Optional<Alert> handle(UpdateAlertCommand command) {
-        Long workspaceId = currentWorkspaceService.getCurrentWorkspaceId()
-                .orElseThrow(() -> new IllegalStateException("User does not have an active workspace"));
-
-        var alertOpt = alertRepository.findByIdAndLaboratoryWorkspaceId(command.id(), workspaceId);
+        var alertOpt = findAccessibleAlert(command.id());
         if (alertOpt.isEmpty()) return Optional.empty();
 
         var alert = alertOpt.get();
         String previousStatus = alert.getStatus();
-        boolean wasResolved = "RESOLVED".equalsIgnoreCase(previousStatus);
+        alert.updateFrom(command, command.laboratoryId());
+        var saved = alertRepository.save(alert);
 
-        Laboratory laboratory = null;
-        if (command.laboratoryId() != null) {
-            laboratory = laboratoryRepository.findByIdAndWorkspaceId(command.laboratoryId(), workspaceId)
-                    .orElseThrow(() -> new IllegalArgumentException("Laboratory not found in this workspace"));
-        } else if (alert.getLaboratory() != null) {
-            laboratory = alert.getLaboratory();
+        if (previousStatus != null && !previousStatus.equalsIgnoreCase(saved.getStatus())) {
+            publishOutbox(saved, "ALERT_STATUS_UPDATED");
         }
-
-        alert.updateFrom(command, laboratory);
-        alertRepository.save(alert);
-
-        boolean isResolvedNow = "RESOLVED".equalsIgnoreCase(alert.getStatus());
-
-        // Audit trail: record status transition with actor from JWT (only when status actually changed)
-        String newStatus = alert.getStatus();
-        if (previousStatus != null && !previousStatus.equalsIgnoreCase(newStatus)) {
-            var actor = currentWorkspaceService.getCurrentUserEmail().orElse("system-automation");
-            var audit = new AuditTrail(
-                    String.valueOf(alert.getId()),
-                    "UPDATE_ALERT_STATUS",
-                    actor,
-                    previousStatus,
-                    newStatus,
-                    "Alert '" + alert.getTitle() + "' status changed in laboratory " +
-                            (laboratory != null ? laboratory.getName() : alert.getLabName()),
-                    calculateHash(alert.getId(), "UPDATE_ALERT_STATUS", actor, previousStatus, newStatus)
-            );
-            auditTrailRepository.save(audit);
-        }
-
-        if (laboratory != null && isResolvedNow) {
-            boolean hasOtherActiveAlerts = alertRepository.findByLaboratoryId(laboratory.getId()).stream()
-                    .anyMatch(a -> !"RESOLVED".equalsIgnoreCase(a.getStatus()) && !a.getId().equals(alert.getId()));
-            if (!hasOtherActiveAlerts) {
-                laboratory.setOverallStatus("OPERATIONAL");
-                laboratory.setStatus("Operational");
-                if (laboratory.getMetrics() != null) {
-                    for (var metric : laboratory.getMetrics()) {
-                        metric.setStatus("NORMAL");
-                    }
-                }
-                laboratoryRepository.save(laboratory);
-            }
-        }
-
-        // Log history record if the alert was newly resolved
-        if (!wasResolved && isResolvedNow) {
-            var record = new HistoryRecord();
-            record.setLaboratory(laboratory);
-            record.setName(alert.getTitle() + " Resolved");
-            record.setDescription("The alert was resolved by " + currentWorkspaceService.getCurrentUserEmail().orElse("System") + ".");
-            record.setOccurredAt(LocalDateTime.now());
-            record.setEventType("incident");
-            record.setSeverity("Info");
-            record.setStatus("Resolved");
-            historyRecordRepository.save(record);
-        }
-
-        return Optional.of(alert);
+        return Optional.of(saved);
     }
 
     @Override
-    @Transactional
     public Optional<Alert> handle(AcknowledgeAlertCommand command) {
-        Long workspaceId = currentWorkspaceService.getCurrentWorkspaceId()
-                .orElseThrow(() -> new IllegalStateException("User does not have an active workspace"));
-
-        var alertOpt = alertRepository.findByIdAndLaboratoryWorkspaceId(command.alertId(), workspaceId);
-        if (alertOpt.isEmpty()) return Optional.empty();
-
-        var alert = alertOpt.get();
-        String previousStatus = alert.getStatus();
-        alert.acknowledge();
-        alertRepository.save(alert);
-
-        var actor = currentWorkspaceService.getCurrentUserEmail().orElse("system-automation");
-        var audit = new AuditTrail(
-                String.valueOf(alert.getId()),
-                "ACKNOWLEDGE_ALERT",
-                actor,
-                previousStatus,
-                "ACKNOWLEDGED",
-                "Alert acknowledged by " + actor,
-                calculateHash(alert.getId(), "ACKNOWLEDGE_ALERT", actor, previousStatus, "ACKNOWLEDGED")
-        );
-        auditTrailRepository.save(audit);
-        return Optional.of(alert);
+        return transition(command.alertId(), Alert::acknowledge, "ALERT_ACKNOWLEDGED");
     }
 
     @Override
-    @Transactional
     public Optional<Alert> handle(AttendAlertCommand command) {
-        Long workspaceId = currentWorkspaceService.getCurrentWorkspaceId()
-                .orElseThrow(() -> new IllegalStateException("User does not have an active workspace"));
-
-        var alertOpt = alertRepository.findByIdAndLaboratoryWorkspaceId(command.alertId(), workspaceId);
-        if (alertOpt.isEmpty()) return Optional.empty();
-
-        var alert = alertOpt.get();
-        String previousStatus = alert.getStatus();
-        alert.attend();
-        alertRepository.save(alert);
-
-        var actor = currentWorkspaceService.getCurrentUserEmail().orElse("system-automation");
-        var audit = new AuditTrail(
-                String.valueOf(alert.getId()),
-                "ATTEND_ALERT",
-                actor,
-                previousStatus,
-                "IN_PROGRESS",
-                "Alert attention started by " + actor,
-                calculateHash(alert.getId(), "ATTEND_ALERT", actor, previousStatus, "IN_PROGRESS")
-        );
-        auditTrailRepository.save(audit);
-        return Optional.of(alert);
+        return transition(command.alertId(), Alert::attend, "ALERT_ATTENDED");
     }
 
     @Override
-    @Transactional
     public Optional<Alert> handle(ResolveAlertCommand command) {
-        Long workspaceId = currentWorkspaceService.getCurrentWorkspaceId()
-                .orElseThrow(() -> new IllegalStateException("User does not have an active workspace"));
-
-        var alertOpt = alertRepository.findByIdAndLaboratoryWorkspaceId(command.alertId(), workspaceId);
-        if (alertOpt.isEmpty()) return Optional.empty();
-
-        var alert = alertOpt.get();
-        String previousStatus = alert.getStatus();
-        alert.resolve();
-        alertRepository.save(alert);
-
-        var actor = currentWorkspaceService.getCurrentUserEmail().orElse("system-automation");
-        var audit = new AuditTrail(
-                String.valueOf(alert.getId()),
-                "RESOLVE_ALERT",
-                actor,
-                previousStatus,
-                "RESOLVED",
-                "Alert resolved by " + actor,
-                calculateHash(alert.getId(), "RESOLVE_ALERT", actor, previousStatus, "RESOLVED")
-        );
-        auditTrailRepository.save(audit);
-
-        var laboratory = alert.getLaboratory();
-        if (laboratory != null) {
-            boolean hasOtherActiveAlerts = alertRepository.findByLaboratoryId(laboratory.getId()).stream()
-                    .anyMatch(a -> !"RESOLVED".equalsIgnoreCase(a.getStatus()) && !"CLOSED".equalsIgnoreCase(a.getStatus()) && !a.getId().equals(alert.getId()));
-            if (!hasOtherActiveAlerts) {
-                laboratory.setOverallStatus("OPERATIONAL");
-                laboratory.setStatus("Operational");
-                laboratoryRepository.save(laboratory);
-            }
-        }
-
-        return Optional.of(alert);
+        return transition(command.alertId(), Alert::resolve, "ALERT_RESOLVED");
     }
 
     @Override
-    @Transactional
     public Optional<Alert> handle(CloseAlertCommand command) {
-        Long workspaceId = currentWorkspaceService.getCurrentWorkspaceId()
-                .orElseThrow(() -> new IllegalStateException("User does not have an active workspace"));
-
-        var alertOpt = alertRepository.findByIdAndLaboratoryWorkspaceId(command.alertId(), workspaceId);
-        if (alertOpt.isEmpty()) return Optional.empty();
-
-        var alert = alertOpt.get();
-        String previousStatus = alert.getStatus();
-        alert.close();
-        alertRepository.save(alert);
-
-        var actor = currentWorkspaceService.getCurrentUserEmail().orElse("system-automation");
-        var audit = new AuditTrail(
-                String.valueOf(alert.getId()),
-                "CLOSE_ALERT",
-                actor,
-                previousStatus,
-                "CLOSED",
-                "Alert formally closed by " + actor,
-                calculateHash(alert.getId(), "CLOSE_ALERT", actor, previousStatus, "CLOSED")
-        );
-        auditTrailRepository.save(audit);
-        return Optional.of(alert);
+        return transition(command.alertId(), Alert::close, "ALERT_CLOSED");
     }
 
     @Override
-    @Transactional
     public void handle(DeleteAlertCommand command) {
-        Long workspaceId = currentWorkspaceService.getCurrentWorkspaceId()
-                .orElseThrow(() -> new IllegalStateException("User does not have an active workspace"));
-
-        var alert = alertRepository.findByIdAndLaboratoryWorkspaceId(command.id(), workspaceId)
+        var alert = findAccessibleAlert(command.id())
                 .orElseThrow(() -> new IllegalArgumentException("Alert not found in this workspace"));
-
         alertRepository.delete(alert);
     }
 
-    /**
-     * SHA-256 signature over the transition, mirroring the incident audit trail
-     * so both share the same tamper-evident format.
-     */
-    private String calculateHash(Long entityId, String action, String actor, String previousState, String newState) {
-        try {
-            var raw = entityId + "|" + action + "|" + actor + "|" + previousState + "|" + newState + "|" + System.currentTimeMillis();
-            var digest = MessageDigest.getInstance("SHA-256");
-            byte[] encoded = digest.digest(raw.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(encoded);
-        } catch (Exception e) {
-            return UUID.randomUUID().toString();
+    private Optional<Alert> transition(Long alertId, Consumer<Alert> action, String eventType) {
+        var alertOpt = findAccessibleAlert(alertId);
+        if (alertOpt.isEmpty()) return Optional.empty();
+
+        var alert = alertOpt.get();
+        action.accept(alert);
+        var saved = alertRepository.save(alert);
+        publishOutbox(saved, eventType);
+        return Optional.of(saved);
+    }
+
+    private Optional<Alert> findAccessibleAlert(Long alertId) {
+        var workspaceIdOpt = jwtSecurityContextAdapter.getCurrentWorkspaceId();
+        if (workspaceIdOpt.isPresent() && !jwtSecurityContextAdapter.isCurrentUserAdmin()) {
+            return alertRepository.findByIdAndLaboratoryWorkspaceId(alertId, workspaceIdOpt.get());
         }
+        return alertRepository.findById(alertId);
+    }
+
+    private void publishOutbox(Alert alert, String eventType) {
+        String orgId = alert.getLaboratoryWorkspaceId() != null
+                ? String.valueOf(alert.getLaboratoryWorkspaceId())
+                : null;
+        String payload = "{\"alertId\":" + alert.getId()
+                + ",\"status\":\"" + alert.getStatus()
+                + "\",\"actor\":\"" + jwtSecurityContextAdapter.getCurrentActor() + "\"}";
+        eventOutboxRepository.save(new SharedEventOutbox(
+                eventType,
+                "Alert",
+                String.valueOf(alert.getId()),
+                payload,
+                orgId,
+                UUID.randomUUID().toString(),
+                SharedEventOutbox.DEFAULT_SCHEMA_VERSION
+        ));
     }
 }
